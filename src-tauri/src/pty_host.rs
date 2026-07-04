@@ -115,6 +115,15 @@ impl PtyHost {
         let s = sessions.get_mut(&id).ok_or("no such pty session")?;
         s.child.kill().map_err(|e| e.to_string())
     }
+
+    /// Kill every session. A freshly booted frontend owns no sessions, so
+    /// anything alive at that point was orphaned by a webview reload.
+    /// ponytail: revisit if terminal reattach-across-reload ever lands (#12)
+    pub fn kill_all(&self) {
+        for s in self.sessions.lock().unwrap().values_mut() {
+            let _ = s.child.kill(); // reader threads reap and emit Exit
+        }
+    }
 }
 
 /// Pump PTY output to the event callback, holding back bytes of a UTF-8

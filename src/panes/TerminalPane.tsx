@@ -4,9 +4,10 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { IDockviewPanelProps } from "dockview-react";
 import "@xterm/xterm/css/xterm.css";
 
-export function TerminalPane() {
+export function TerminalPane(props: IDockviewPanelProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,13 +61,13 @@ export function TerminalPane() {
       if (e.payload.id === ptyId) term.write(e.payload.data);
     });
     const unExit = listen<{ id: number }>("pty:exit", (e) => {
-      if (e.payload.id === ptyId) term.write("\r\n[process exited]\r\n");
+      if (e.payload.id === ptyId) props.api.close();
     });
 
     invoke<number>("pty_spawn", { cols: term.cols, rows: term.rows }).then(
       (id) => {
         if (disposed) {
-          invoke("pty_kill", { id });
+          invoke("pty_kill", { id }).catch(() => {});
           return;
         }
         ptyId = id;
@@ -80,6 +81,12 @@ export function TerminalPane() {
     term.onResize(({ cols, rows }) => {
       if (ptyId != null) invoke("pty_resize", { id: ptyId, cols, rows });
     });
+    term.onTitleChange((title) => props.api.setTitle(title));
+
+    const activeSub = props.api.onDidActiveChange(({ isActive }) => {
+      if (isActive) term.focus();
+    });
+    if (props.api.isActive) term.focus();
 
     const observer = new ResizeObserver(() => fit.fit());
     observer.observe(el);
@@ -87,9 +94,10 @@ export function TerminalPane() {
     return () => {
       disposed = true;
       observer.disconnect();
+      activeSub.dispose();
       unData.then((u) => u());
       unExit.then((u) => u());
-      if (ptyId != null) invoke("pty_kill", { id: ptyId });
+      if (ptyId != null) invoke("pty_kill", { id: ptyId }).catch(() => {});
       term.dispose();
     };
   }, []);

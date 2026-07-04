@@ -240,6 +240,17 @@
   --dv-paneview-active-outline-color: var(--accent);
 }
 
+/* focused split: its active tab carries the accent marker, like the design's
+   terminal tab; unfocused splits drop it so the focused pane reads at a glance */
+.app-dock .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
+  box-shadow: inset 0 2px 0 var(--accent);
+  color: var(--text-1);
+}
+
+.app-dock .dv-groupview:not(.dv-active-group) > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
+  box-shadow: none;
+}
+
 .terminal-pane {
   width: 100%;
   height: 100%;

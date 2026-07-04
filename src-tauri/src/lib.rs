@@ -29,6 +29,11 @@ fn pty_kill(host: State<PtyHost>, id: u32) -> Result<(), String> {
     host.kill(id)
 }
 
+#[tauri::command]
+fn pty_reset(host: State<PtyHost>) {
+    host.kill_all();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -44,7 +49,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            pty_spawn, pty_write, pty_resize, pty_kill
+            pty_spawn, pty_write, pty_resize, pty_kill, pty_reset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
