@@ -1,0 +1,135 @@
+/* Shorikai design tokens — transcribed from design/project/Cockpit.dc.html
+   (the visual source of truth). Do not hardcode these values in components. */
+:root {
+  /* ---------- backgrounds ---------- */
+  --bg: #101216; /* app base — near-black charcoal */
+  --titlebar: #0c0e12; /* one notch darker than base */
+  --surface-1: #15171c; /* panels, one step lighter */
+  --surface-2: #191c22; /* raised: tabs, cards, inputs */
+  --surface-3: #20242b; /* hover / selected row */
+  --surface-4: #272c34; /* strong hover / active selection */
+  /* ---------- borders ---------- */
+  --border: #22262e; /* subtle 1px region separators */
+  --border-soft: #1a1d23;
+  --border-strong: #30353e; /* dividers, emphasis */
+  /* ---------- text tiers ---------- */
+  --text-1: #d7dae0; /* primary — not pure white */
+  --text-2: #9aa0ab; /* secondary */
+  --text-3: #6b7079; /* tertiary / muted labels */
+  --text-4: #464b54; /* faint — line numbers, ghost */
+  /* ---------- accent — single, cyan/teal ---------- */
+  --accent: #3fbecb;
+  --accent-bright: #5cd4df;
+  --accent-dim: #2c8a95;
+  --accent-wash: rgba(63, 190, 203, 0.1);
+  --accent-border: rgba(63, 190, 203, 0.55);
+  /* ---------- semantic ---------- */
+  --success: #4bb479;
+  --success-dot: #3fb950;
+  --error: #df6a61;
+  --warning: #d3a24a;
+  --git-added: #57c98a;
+  --git-added-bg: rgba(63, 185, 80, 0.11);
+  --git-modified: #d0a54f;
+  --git-modified-bg: rgba(208, 165, 79, 0.11);
+  --git-deleted: #df6a61;
+  --git-deleted-bg: rgba(223, 106, 97, 0.11);
+  --diff-add-bg: rgba(63, 185, 80, 0.12);
+  --diff-add-gut: rgba(63, 185, 80, 0.22);
+  --diff-del-bg: rgba(223, 106, 97, 0.12);
+  --diff-del-gut: rgba(223, 106, 97, 0.22);
+  /* ---------- syntax ---------- */
+  --syn-keyword: #c98a63;
+  --syn-string: #8bb872;
+  --syn-func: #d9b46a;
+  --syn-type: #5db3c0;
+  --syn-num: #cf8e6d;
+  --syn-comment: #565c66;
+  --syn-plain: #b9bdc5;
+  --syn-punct: #868b94;
+  /* ---------- type scale (mono) ---------- */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 15px;
+  --fs-xl: 17px;
+  /* ---------- spacing ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  /* ---------- radii ---------- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  /* ---------- typography ---------- */
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  letter-spacing: -0.1px;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2f38;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #353b45;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::selection {
+  background: rgba(63, 190, 203, 0.26);
+}
+
+@keyframes ckpt-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ckpt-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes ckpt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,253 @@
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ============ titlebar ============ */
+.titlebar {
+  height: 40px;
+  flex: none;
+  background: var(--titlebar);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  /* left inset clears the native macOS traffic lights (overlay titlebar) */
+  padding: 0 12px 0 84px;
+  gap: 14px;
+}
+
+.titlebar-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.project-tab {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 15px;
+  height: 100%;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  border-right: 1px solid var(--border);
+}
+
+.project-tab-active {
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  color: var(--text-1);
+}
+
+.project-tab-new {
+  display: flex;
+  align-items: center;
+  padding: 0 13px;
+  height: 100%;
+  color: var(--text-3);
+  font-size: 15px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dot-idle {
+  background: var(--success-dot);
+  box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.14);
+}
+
+/* ============ body row ============ */
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ============ sidebar ============ */
+.sidebar {
+  width: 260px;
+  flex: none;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-wordmark {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.wordmark-glyph {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--accent);
+  display: inline-block;
+  position: relative;
+}
+
+.wordmark-glyph > span {
+  position: absolute;
+  inset: 3px 4px;
+  border-left: 2px solid var(--titlebar);
+  border-bottom: 2px solid var(--titlebar);
+}
+
+.wordmark-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: var(--text-1);
+}
+
+.wordmark-version {
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  color: var(--text-4);
+  letter-spacing: 0.5px;
+}
+
+.sidebar-switch-wrap {
+  padding: 12px 12px 10px;
+  flex: none;
+}
+
+.sidebar-switch {
+  display: flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 3px;
+  gap: 2px;
+}
+
+.switch-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  border-radius: var(--r-xs);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  background: none;
+  border: none;
+  font-family: inherit;
+  letter-spacing: inherit;
+  cursor: default;
+  padding: 0;
+}
+
+.switch-item-active {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+.sidebar-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 14px 6px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  letter-spacing: 1px;
+}
+
+.sidebar-panel-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+/* ============ status bar ============ */
+.statusbar {
+  height: 24px;
+  flex: none;
+  background: var(--titlebar);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.statusbar-seg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  height: 100%;
+}
+
+.statusbar-seg + .statusbar-seg,
+.statusbar-right .statusbar-seg {
+  border-left: 1px solid var(--border);
+}
+
+.statusbar-branch {
+  color: var(--accent);
+}
+
+.statusbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+/* ============ dock / panes ============ */
+.app-dock {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.app-dock.dockview-theme-dark {
+  --dv-group-view-background-color: var(--bg);
+  --dv-tabs-and-actions-container-background-color: var(--surface-1);
+  --dv-tabs-and-actions-container-height: 30px;
+  --dv-tabs-and-actions-container-font-size: var(--fs-xs);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--surface-1);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--surface-2);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--surface-1);
+  --dv-activegroup-visiblepanel-tab-color: var(--text-1);
+  --dv-activegroup-hiddenpanel-tab-color: var(--text-3);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text-2);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--text-3);
+  --dv-separator-border: var(--border);
+  --dv-tab-divider-color: var(--border);
+  --dv-drag-over-background-color: var(--accent-wash);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-paneview-active-outline-color: var(--accent);
+}
+
+.terminal-pane {
+  width: 100%;
+  height: 100%;
+  padding: 8px 0 0 14px;
+  box-sizing: border-box;
+  background: var(--surface-1);
+}
+
+.terminal-pane .xterm-viewport {
+  background: var(--surface-1) !important;
+}

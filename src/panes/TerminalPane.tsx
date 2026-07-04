@@ -1,0 +1,98 @@
+import { useEffect, useRef } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import "@xterm/xterm/css/xterm.css";
+
+export function TerminalPane() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current!;
+    const css = getComputedStyle(document.documentElement);
+    const tok = (name: string) => css.getPropertyValue(name).trim();
+    const term = new Terminal({
+      fontFamily: tok("--font-mono"),
+      fontSize: 12.5,
+      lineHeight: 1.44, /* 18px over 12.5px, per the design's terminal block */
+      cursorBlink: true,
+      theme: {
+        background: tok("--surface-1"),
+        foreground: tok("--text-2"),
+        cursor: tok("--text-2"),
+        selectionBackground: "rgba(63, 190, 203, 0.26)",
+        black: tok("--titlebar"),
+        red: tok("--error"),
+        green: tok("--git-added"),
+        yellow: tok("--warning"),
+        blue: tok("--syn-type"),
+        magenta: tok("--syn-keyword"),
+        cyan: tok("--accent"),
+        white: tok("--text-1"),
+        brightBlack: tok("--text-4"),
+        brightRed: tok("--error"),
+        brightGreen: tok("--success"),
+        brightYellow: tok("--syn-func"),
+        brightBlue: tok("--accent-dim"),
+        brightMagenta: tok("--syn-num"),
+        brightCyan: tok("--accent-bright"),
+        brightWhite: tok("--text-1"),
+      },
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(el);
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch (e) {
+      console.warn("WebGL renderer unavailable, using canvas fallback", e);
+    }
+    fit.fit();
+
+    let ptyId: number | null = null;
+    let disposed = false;
+
+    const unData = listen<{ id: number; data: string }>("pty:data", (e) => {
+      if (e.payload.id === ptyId) term.write(e.payload.data);
+    });
+    const unExit = listen<{ id: number }>("pty:exit", (e) => {
+      if (e.payload.id === ptyId) term.write("\r\n[process exited]\r\n");
+    });
+
+    invoke<number>("pty_spawn", { cols: term.cols, rows: term.rows }).then(
+      (id) => {
+        if (disposed) {
+          invoke("pty_kill", { id });
+          return;
+        }
+        ptyId = id;
+      },
+      (err) => term.write(`\r\nfailed to spawn shell: ${err}\r\n`),
+    );
+
+    term.onData((data) => {
+      if (ptyId != null) invoke("pty_write", { id: ptyId, data });
+    });
+    term.onResize(({ cols, rows }) => {
+      if (ptyId != null) invoke("pty_resize", { id: ptyId, cols, rows });
+    });
+
+    const observer = new ResizeObserver(() => fit.fit());
+    observer.observe(el);
+
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      unData.then((u) => u());
+      unExit.then((u) => u());
+      if (ptyId != null) invoke("pty_kill", { id: ptyId });
+      term.dispose();
+    };
+  }, []);
+
+  return <div ref={ref} className="terminal-pane" />;
+}
