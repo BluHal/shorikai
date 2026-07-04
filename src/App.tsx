@@ -9,11 +9,13 @@ import { Titlebar } from "./chrome/Titlebar";
 import { Sidebar } from "./chrome/Sidebar";
 import { StatusBar } from "./chrome/StatusBar";
 import { TerminalPane } from "./panes/TerminalPane";
+import { ChatPane } from "./panes/ChatPane";
 import "dockview-react/dist/styles/dockview.css";
 import "./App.css";
 
 const components = {
   terminal: TerminalPane,
+  chat: ChatPane,
 };
 
 let termSeq = 0;
@@ -57,7 +59,12 @@ function handleKey(api: DockviewApi, e: KeyboardEvent): (() => void) | null {
   if (cmd && !shift && !alt && !ctrl) {
     if (key === "KeyT") return () => addTerminal(api);
     if (key === "KeyD") return () => addTerminal(api, "right");
-    if (key === "KeyW") return () => api.activePanel?.api.close();
+    if (key === "KeyW")
+      return () => {
+        const p = api.activePanel;
+        // only terminals are closable; the chat pane is the main stage
+        if (p?.id.startsWith("terminal-")) p.api.close();
+      };
     if (key === "BracketRight") return () => cycleGroup(api, 1);
     if (key === "BracketLeft") return () => cycleGroup(api, -1);
   }
@@ -83,14 +90,35 @@ function App() {
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
+    const spawnTerminalBelowChat = () => {
+      const chat = event.api.getPanel("chat");
+      const panel = event.api.addPanel({
+        id: `terminal-${++termSeq}`,
+        component: "terminal",
+        title: "zsh",
+        position: chat
+          ? { referencePanel: chat, direction: "below" }
+          : undefined,
+      });
+      return panel;
+    };
     // the cockpit always keeps at least one terminal alive
     event.api.onDidRemovePanel(() => {
-      if (event.api.panels.length === 0) addTerminal(event.api);
+      if (!event.api.panels.some((p) => p.id.startsWith("terminal-"))) {
+        spawnTerminalBelowChat();
+      }
     });
-    // reap PTYs orphaned by a webview reload before spawning ours
-    invoke("pty_reset")
-      .catch(() => {})
-      .finally(() => addTerminal(event.api));
+    // reap PTYs/agents orphaned by a webview reload before spawning ours
+    Promise.allSettled([invoke("pty_reset"), invoke("acp_reset")]).finally(
+      () => {
+        event.api.addPanel({
+          id: "chat",
+          component: "chat",
+          title: "Claude Code",
+        });
+        spawnTerminalBelowChat().api.setSize({ height: 240 });
+      },
+    );
   };
 
   useEffect(() => {
