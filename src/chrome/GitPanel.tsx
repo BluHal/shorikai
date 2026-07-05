@@ -1,20 +1,13 @@
 import { useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { bus } from "../bus";
-import {
-  getGit,
-  getGitRoot,
-  GitFile,
-  refreshGit,
-  subscribeGit,
-} from "../gitStore";
+import { getGitFor, GitFile, refreshGit, subscribeGit } from "../gitStore";
+import { useProjectRoot } from "../projects";
 
 const statusClass = (s: string) =>
   s === "D" ? "git-del" : s === "M" || s === "R" ? "git-mod" : "git-add";
 
-function openDiff(file: GitFile) {
-  const root = getGitRoot();
-  if (!root) return;
+function openDiff(root: string, file: GitFile) {
   invoke<{ old_text: string; new_text: string }>("git_diff", {
     root,
     path: file.path,
@@ -25,6 +18,7 @@ function openDiff(file: GitFile) {
 }
 
 function Row(props: {
+  root: string;
   file: GitFile;
   letter: string;
   action: "stage" | "unstage";
@@ -34,7 +28,7 @@ function Row(props: {
   const name = file.path.split("/").pop() ?? file.path;
   const dir = file.path.slice(0, file.path.length - name.length - 1);
   return (
-    <div className="git-row" onClick={() => openDiff(file)}>
+    <div className="git-row" onClick={() => openDiff(props.root, file)}>
       <span className={`git-letter ${statusClass(letter)}`}>
         {letter === "?" ? "U" : letter}
       </span>
@@ -55,7 +49,8 @@ function Row(props: {
 }
 
 export function GitPanel() {
-  const git = useSyncExternalStore(subscribeGit, getGit);
+  const root = useProjectRoot();
+  const git = useSyncExternalStore(subscribeGit, () => getGitFor(root));
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,10 +61,9 @@ export function GitPanel() {
 
   const staged = git.files.filter((f) => f.staged != null);
   const unstaged = git.files.filter((f) => f.unstaged != null);
-  const root = getGitRoot();
 
   const act = (cmd: "git_stage" | "git_unstage", path: string) => {
-    invoke(cmd, { root, path }).then(refreshGit, (e) => setError(String(e)));
+    invoke(cmd, { root, path }).then(() => refreshGit(root), (e) => setError(String(e)));
   };
 
   const commit = () => {
@@ -80,7 +74,7 @@ export function GitPanel() {
       () => {
         setMessage("");
         setBusy(false);
-        refreshGit();
+        refreshGit(root);
       },
       (e) => {
         setError(String(e));
@@ -96,6 +90,7 @@ export function GitPanel() {
         {staged.map((f) => (
           <Row
             key={`s:${f.path}`}
+            root={root}
             file={f}
             letter={f.staged!}
             action="unstage"
@@ -108,6 +103,7 @@ export function GitPanel() {
         {unstaged.map((f) => (
           <Row
             key={`u:${f.path}`}
+            root={root}
             file={f}
             letter={f.unstaged!}
             action="stage"

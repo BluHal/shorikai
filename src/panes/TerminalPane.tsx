@@ -5,10 +5,12 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { IDockviewPanelProps } from "dockview-react";
+import { useProjectRoot } from "../projects";
 import "@xterm/xterm/css/xterm.css";
 
 export function TerminalPane(props: IDockviewPanelProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const root = useProjectRoot();
 
   useEffect(() => {
     const el = ref.current!;
@@ -64,7 +66,11 @@ export function TerminalPane(props: IDockviewPanelProps) {
       if (e.payload.id === ptyId) props.api.close();
     });
 
-    invoke<number>("pty_spawn", { cols: term.cols, rows: term.rows }).then(
+    invoke<number>("pty_spawn", {
+      cols: term.cols,
+      rows: term.rows,
+      cwd: root,
+    }).then(
       (id) => {
         if (disposed) {
           invoke("pty_kill", { id }).catch(() => {});

@@ -4,16 +4,14 @@ import { bus } from "../bus";
 // inline code that looks like a path (optionally :line) becomes clickable
 const FILE_REF = /^([\w@/][\w@./-]*\.[A-Za-z0-9]{1,8})(?::(\d+))?$/;
 
-let projectRoot = "";
-export const setProjectRoot = (root: string) => {
-  projectRoot = root;
-};
-
-function CodeOrFileRef(props: React.HTMLAttributes<HTMLElement>) {
+function CodeOrFileRef(
+  props: React.HTMLAttributes<HTMLElement> & { root: string },
+) {
+  const { root, ...rest } = props;
   const text = String(props.children ?? "");
   const m = !text.includes("\n") ? FILE_REF.exec(text) : null;
   if (m) {
-    const path = m[1].startsWith("/") ? m[1] : `${projectRoot}/${m[1]}`;
+    const path = m[1].startsWith("/") ? m[1] : `${root}/${m[1]}`;
     const line = m[2] ? Number(m[2]) : undefined;
     return (
       <code
@@ -25,7 +23,21 @@ function CodeOrFileRef(props: React.HTMLAttributes<HTMLElement>) {
       </code>
     );
   }
-  return <code {...props} />;
+  return <code {...rest} />;
 }
 
-export const mdComponents = { code: CodeOrFileRef };
+const cache = new Map<string, { code: React.ComponentType<React.HTMLAttributes<HTMLElement>> }>();
+
+/// stable per-root component map for react-markdown
+export function mdComponentsFor(root: string) {
+  let entry = cache.get(root);
+  if (!entry) {
+    entry = {
+      code: (props: React.HTMLAttributes<HTMLElement>) => (
+        <CodeOrFileRef {...props} root={root} />
+      ),
+    };
+    cache.set(root, entry);
+  }
+  return entry;
+}

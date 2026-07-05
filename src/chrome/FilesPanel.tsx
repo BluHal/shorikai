@@ -2,7 +2,8 @@ import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "rea
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { bus } from "../bus";
-import { getGit, subscribeGit } from "../gitStore";
+import { getGitFor, subscribeGit, trackGitRoot } from "../gitStore";
+import { useProjectRoot } from "../projects";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 
@@ -45,16 +46,16 @@ const FolderIcon = ({ dim }: { dim?: boolean }) => (
 );
 
 export function FilesPanel() {
-  const [root, setRoot] = useState<string | null>(null);
+  const root = useProjectRoot();
   const [children, setChildren] = useState<Map<string, Entry[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const childrenRef = useRef(children);
   childrenRef.current = children;
-  const git = useSyncExternalStore(subscribeGit, getGit);
+  const git = useSyncExternalStore(subscribeGit, () => getGitFor(root));
 
   // abs path -> status letter (worktree wins over index)
   const gitByPath = new Map<string, string>();
-  if (root && git) {
+  if (git) {
     for (const f of git.files) {
       const letter = f.unstaged ?? f.staged;
       if (letter) gitByPath.set(`${root}/${f.path}`, letter);
@@ -77,10 +78,9 @@ export function FilesPanel() {
 
   useEffect(() => {
     (async () => {
-      const r = await invoke<string>("project_root");
-      setRoot(r);
-      await invoke("ws_watch", { root: r }).catch(() => {});
-      await listInto(r);
+      trackGitRoot(root);
+      await invoke("ws_watch", { root }).catch(() => {});
+      await listInto(root);
     })();
     const un = listen<{ paths: string[] }>("ws:changed", (e) => {
       for (const p of e.payload.paths) {
@@ -90,7 +90,7 @@ export function FilesPanel() {
     return () => {
       un.then((u) => u());
     };
-  }, []);
+  }, [root]);
 
   const toggle = (dir: string) => {
     setExpanded((prev) => {
@@ -138,6 +138,5 @@ export function FilesPanel() {
       ),
     );
 
-  if (!root) return <div className="sidebar-panel-empty">loading…</div>;
   return <div className="tree">{renderDir(root, 0)}</div>;
 }

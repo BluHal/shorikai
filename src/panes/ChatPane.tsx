@@ -4,7 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ToolCard, ToolContentItem, ToolRow } from "./ToolCard";
-import { mdComponents, setProjectRoot } from "./mdComponents";
+import { mdComponentsFor } from "./mdComponents";
+import { setAgentStatus, useProjectRoot } from "../projects";
 import {
   AgentStrip,
   DrillBody,
@@ -105,6 +106,8 @@ type Status = "starting" | "ready" | "busy" | "dead";
 const AGENT = "claude-code";
 
 export function ChatPane() {
+  const root = useProjectRoot();
+  const mdComponents = mdComponentsFor(root);
   const [rows, setRows] = useState<Row[]>([]);
   const [status, setStatus] = useState<Status>("starting");
   const [input, setInput] = useState("");
@@ -120,8 +123,6 @@ export function ChatPane() {
     setSubs([]);
     setDrill(null);
     try {
-      const root = await invoke<string>("project_root");
-      setProjectRoot(root);
       agentIdRef.current = await invoke<number>("acp_start", {
         agent: AGENT,
         cwd: root,
@@ -182,6 +183,7 @@ export function ChatPane() {
           break;
         }
         case "permission_request":
+          setAgentStatus(root, "attention");
           setRows((r) => [
             ...r,
             {
@@ -199,9 +201,11 @@ export function ChatPane() {
             ),
           );
           setStatus("ready");
+          setAgentStatus(root, "attention"); // downgraded to idle if tab is active
           break;
         case "agent_exit":
           setStatus("dead");
+          setAgentStatus(root, "attention");
           setRows((r) => [
             ...r,
             {
@@ -239,8 +243,10 @@ export function ChatPane() {
     setRows((r) => [...r, { kind: "user", text }]);
     setInput("");
     setStatus("busy");
+    setAgentStatus(root, "working");
     invoke("acp_prompt", { id: agentIdRef.current, text }).catch((err) => {
       setStatus("ready");
+      setAgentStatus(root, "idle");
       setRows((r) => [...r, { kind: "system", text: `error: ${err}` }]);
     });
   };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { bus } from "../bus";
+import { getProjects } from "../projects";
 
 type Mode = "files" | "content";
 type ContentHit = { path: string; line: number; text: string; spans: [number, number][] };
@@ -46,10 +47,9 @@ export function SearchOverlay() {
     if (!mode) return;
     const seq = ++seqRef.current;
     const run = async () => {
-      if (!rootRef.current) {
-        rootRef.current = await invoke<string>("project_root");
-      }
+      rootRef.current = getProjects().active;
       const root = rootRef.current;
+      if (!root) return;
       try {
         if (mode === "files") {
           const hits = await invoke<string[]>("ws_fuzzy", { root, query });

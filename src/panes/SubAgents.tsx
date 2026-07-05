@@ -1,6 +1,7 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { mdComponents } from "./mdComponents";
+import { mdComponentsFor } from "./mdComponents";
+import { useProjectRoot } from "../projects";
 
 export type SubAgent = {
   id: string;
@@ -116,6 +117,7 @@ export function DrillCrumb(props: { sub: SubAgent; onBack: () => void }) {
 }
 
 export function DrillBody({ sub }: { sub: SubAgent }) {
+  const mdComponents = mdComponentsFor(useProjectRoot());
   return (
     <div className="drill-body">
       <div className="drill-head">

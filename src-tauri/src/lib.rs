@@ -1,6 +1,7 @@
 mod acp_bridge;
 mod git_status;
 mod pty_host;
+mod session_state;
 mod workspace_index;
 
 use acp_bridge::{AcpBridge, AcpEvent};
@@ -103,6 +104,21 @@ fn ws_watch(index: State<WorkspaceIndex>, root: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ws_unwatch(index: State<WorkspaceIndex>, root: String) {
+    index.unwatch(&root);
+}
+
+#[tauri::command]
+fn session_load() -> Result<Value, String> {
+    session_state::load()
+}
+
+#[tauri::command]
+fn session_save(state: Value) -> Result<(), String> {
+    session_state::save(&state)
+}
+
+#[tauri::command]
 fn ws_list(path: String) -> Result<Vec<workspace_index::Entry>, String> {
     workspace_index::list_dir(std::path::Path::new(&path))
 }
@@ -172,6 +188,7 @@ fn git_diff(root: String, path: String) -> Result<git_status::DiffTexts, String>
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
             app.manage(PtyHost::new(move |event| {
@@ -205,6 +222,9 @@ pub fn run() {
             acp_kill,
             acp_reset,
             ws_watch,
+            ws_unwatch,
+            session_load,
+            session_save,
             ws_list,
             ws_fuzzy,
             ws_search,

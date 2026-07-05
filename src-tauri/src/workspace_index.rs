@@ -8,7 +8,6 @@ use nucleo_matcher::{Config, Matcher};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -44,43 +43,57 @@ pub fn list_dir(path: &Path) -> Result<Vec<Entry>, String> {
 }
 
 pub struct WorkspaceIndex {
-    watcher: Mutex<Option<RecommendedWatcher>>,
+    watchers: Mutex<std::collections::HashMap<String, RecommendedWatcher>>,
     on_change: Arc<dyn Fn(Vec<String>) + Send + Sync>,
-    /// file list for fuzzy matching, rebuilt lazily when the watcher fires
-    files_cache: Mutex<Option<(String, Arc<Vec<String>>)>>,
-    files_dirty: Arc<AtomicBool>,
+    /// per-root file lists for fuzzy matching, rebuilt lazily when dirty
+    files_cache: Mutex<std::collections::HashMap<String, Arc<Vec<String>>>>,
+    dirty_roots: Arc<Mutex<HashSet<String>>>,
 }
 
 impl WorkspaceIndex {
     pub fn new(on_change: impl Fn(Vec<String>) + Send + Sync + 'static) -> Self {
         Self {
-            watcher: Mutex::new(None),
+            watchers: Mutex::new(std::collections::HashMap::new()),
             on_change: Arc::new(on_change),
-            files_cache: Mutex::new(None),
-            files_dirty: Arc::new(AtomicBool::new(false)),
+            files_cache: Mutex::new(std::collections::HashMap::new()),
+            dirty_roots: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
-    /// Watch `root` recursively; replaces any previous watch. Changed
-    /// directories are reported coalesced over a 250ms window.
+    /// Watch `root` recursively (idempotent per root; one watcher per open
+    /// project). Changed directories are reported coalesced over 250ms.
     pub fn watch(&self, root: &Path) -> Result<(), String> {
+        let key = root.to_string_lossy().into_owned();
+        let mut watchers = self.watchers.lock().unwrap();
+        if watchers.contains_key(&key) {
+            return Ok(());
+        }
         let (tx, rx) = mpsc::channel();
         let mut watcher = notify::recommended_watcher(tx).map_err(|e| e.to_string())?;
         watcher
             .watch(root, RecursiveMode::Recursive)
             .map_err(|e| e.to_string())?;
-        // dropping the old watcher closes its channel and ends its thread
-        *self.watcher.lock().unwrap() = Some(watcher);
+        watchers.insert(key.clone(), watcher);
 
         let on_change = Arc::clone(&self.on_change);
-        let dirty = Arc::clone(&self.files_dirty);
+        let dirty = Arc::clone(&self.dirty_roots);
         std::thread::spawn(move || {
-            coalesce_loop(rx, Arc::new(move |dirs: Vec<String>| {
-                dirty.store(true, Ordering::Relaxed);
-                on_change(dirs);
-            }))
+            coalesce_loop(
+                rx,
+                Arc::new(move |dirs: Vec<String>| {
+                    dirty.lock().unwrap().insert(key.clone());
+                    on_change(dirs);
+                }),
+            )
         });
         Ok(())
+    }
+
+    /// Stop watching a root (project tab closed); drops its caches too.
+    pub fn unwatch(&self, root: &str) {
+        self.watchers.lock().unwrap().remove(root);
+        self.files_cache.lock().unwrap().remove(root);
+        self.dirty_roots.lock().unwrap().remove(root);
     }
 
     /// Fuzzy-match `query` against project-relative file paths (gitignore
@@ -107,8 +120,9 @@ impl WorkspaceIndex {
 
     fn files(&self, root: &str) -> Result<Arc<Vec<String>>, String> {
         let mut cache = self.files_cache.lock().unwrap();
-        if let Some((cached_root, files)) = cache.as_ref() {
-            if cached_root == root && !self.files_dirty.swap(false, Ordering::Relaxed) {
+        let dirty = self.dirty_roots.lock().unwrap().remove(root);
+        if !dirty {
+            if let Some(files) = cache.get(root) {
                 return Ok(Arc::clone(files));
             }
         }
@@ -126,7 +140,7 @@ impl WorkspaceIndex {
         }
         files.sort();
         let files = Arc::new(files);
-        *cache = Some((root.to_owned(), Arc::clone(&files)));
+        cache.insert(root.to_owned(), Arc::clone(&files));
         Ok(files)
     }
 }

@@ -2,7 +2,8 @@ import { useState, useSyncExternalStore } from "react";
 import { FilesPanel } from "./FilesPanel";
 import { GitPanel } from "./GitPanel";
 import { bus } from "../bus";
-import { getGit, subscribeGit } from "../gitStore";
+import { getGitFor, subscribeGit } from "../gitStore";
+import { useProjectRoot } from "../projects";
 
 const FileIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -34,8 +35,9 @@ const views = [
 type ViewId = (typeof views)[number]["id"];
 
 export function Sidebar() {
+  const root = useProjectRoot();
   const [view, setView] = useState<ViewId>("files");
-  const git = useSyncExternalStore(subscribeGit, getGit);
+  const git = useSyncExternalStore(subscribeGit, () => getGitFor(root));
   const changeCount = git?.files.length ?? 0;
 
   return (

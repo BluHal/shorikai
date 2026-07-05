@@ -63,10 +63,59 @@
   box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.14);
 }
 
+.dot-attention {
+  width: 8px;
+  height: 8px;
+  background: var(--warning);
+  box-shadow: 0 0 0 3px rgba(211, 162, 74, 0.14);
+}
+
+.tab-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: ckpt-spin 0.8s linear infinite;
+  display: inline-block;
+  flex: none;
+}
+
+.project-tab {
+  cursor: default;
+}
+
+.tab-branch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tab-close {
+  color: var(--text-4);
+  font-size: 13px;
+  margin-left: 2px;
+  cursor: pointer;
+}
+
+.tab-close:hover {
+  color: var(--text-1);
+}
+
 /* ============ body row ============ */
 .app-body {
   flex: 1;
   display: flex;
+  min-height: 0;
+}
+
+/* each project is a full workspace; inactive ones stay mounted but hidden */
+.workspace {
+  flex: 1;
+  display: flex;
+  min-width: 0;
   min-height: 0;
 }
 
