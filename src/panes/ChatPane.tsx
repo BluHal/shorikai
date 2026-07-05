@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ToolCard, ToolContentItem, ToolRow } from "./ToolCard";
+import { mdComponents, setProjectRoot } from "./mdComponents";
 import {
   AgentStrip,
   DrillBody,
@@ -120,6 +121,7 @@ export function ChatPane() {
     setDrill(null);
     try {
       const root = await invoke<string>("project_root");
+      setProjectRoot(root);
       agentIdRef.current = await invoke<number>("acp_start", {
         agent: AGENT,
         cwd: root,
@@ -305,7 +307,9 @@ export function ChatPane() {
               case "agent":
                 return (
                   <div key={i} className="chat-agent chat-md">
-                    <Markdown remarkPlugins={[remarkGfm]}>{row.text}</Markdown>
+                    <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                      {row.text}
+                    </Markdown>
                   </div>
                 );
               case "system":

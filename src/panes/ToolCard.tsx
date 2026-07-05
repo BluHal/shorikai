@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { diffLines } from "diff";
+import { bus } from "../bus";
 
 export type ToolContentItem = {
   type: "content" | "diff" | "terminal";
@@ -207,6 +208,15 @@ export function DiffCard(props: { path: string; oldText: string; newText: string
         </span>
         <span className="diff-adds">+{adds}</span>
         <span className="diff-dels">−{dels}</span>
+        <span
+          className="diff-open"
+          onClick={() => bus.openDiff(props.path, props.oldText, props.newText)}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+          Open in editor
+        </span>
       </div>
       <div className="diff-cols">
         <div className="diff-col diff-col-left">

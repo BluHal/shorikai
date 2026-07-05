@@ -3,27 +3,42 @@ import { invoke } from "@tauri-apps/api/core";
 import type { IDockviewPanelProps } from "dockview-react";
 import { monaco } from "../monacoSetup";
 
-export function EditorPane(props: IDockviewPanelProps<{ path: string }>) {
+// Saved-version bookkeeping survives pane unmounts (e.g. rail collapse):
+// models are kept alive so dirty edits and undo history come back.
+const savedVersions = new Map<string, number>();
+
+type Params = { path: string; line?: number; nonce?: number };
+
+export function EditorPane(props: IDockviewPanelProps<Params>) {
   const ref = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const revealLine = (line: number | undefined) => {
+    const editor = editorRef.current;
+    if (editor && line != null) {
+      editor.revealLineInCenter(line);
+      editor.setPosition({ lineNumber: line, column: 1 });
+    }
+  };
 
   useEffect(() => {
     const path = props.params.path;
     const name = path.split("/").pop() ?? path;
-    let editor: monaco.editor.IStandaloneCodeEditor | undefined;
-    let model: monaco.editor.ITextModel | undefined;
     let observer: ResizeObserver | undefined;
+    let activeSub: { dispose(): void } | undefined;
     let disposed = false;
 
     invoke<string>("fs_read", { path }).then(
       (text) => {
         if (disposed) return;
         const uri = monaco.Uri.file(path);
-        model = monaco.editor.getModel(uri) ?? undefined;
+        let model = monaco.editor.getModel(uri);
         if (!model) {
           model = monaco.editor.createModel(text, undefined, uri);
+          savedVersions.set(path, model.getAlternativeVersionId());
         }
-        editor = monaco.editor.create(ref.current!, {
+        const editor = monaco.editor.create(ref.current!, {
           model,
           theme: "shorikai",
           fontFamily: getComputedStyle(document.documentElement)
@@ -37,32 +52,32 @@ export function EditorPane(props: IDockviewPanelProps<{ path: string }>) {
           renderLineHighlight: "line",
           fixedOverflowWidgets: true,
         });
+        editorRef.current = editor;
 
-        let savedVersion = model.getAlternativeVersionId();
-        model.onDidChangeContent(() => {
-          const dirty = model!.getAlternativeVersionId() !== savedVersion;
+        const syncTitle = () => {
+          const dirty =
+            model!.getAlternativeVersionId() !== savedVersions.get(path);
           props.api.setTitle(dirty ? `● ${name}` : name);
-        });
+        };
+        syncTitle();
+        model.onDidChangeContent(syncTitle);
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
           try {
             await invoke("fs_write", { path, contents: model!.getValue() });
-            savedVersion = model!.getAlternativeVersionId();
+            savedVersions.set(path, model!.getAlternativeVersionId());
             props.api.setTitle(name);
           } catch (err) {
             setError(`save failed: ${err}`);
           }
         });
 
-        observer = new ResizeObserver(() => editor?.layout());
+        observer = new ResizeObserver(() => editor.layout());
         observer.observe(ref.current!);
-
-        const activeSub = props.api.onDidActiveChange(({ isActive }) => {
-          if (isActive) editor?.focus();
+        activeSub = props.api.onDidActiveChange(({ isActive }) => {
+          if (isActive) editor.focus();
         });
         if (props.api.isActive) editor.focus();
-        // stash for cleanup
-        (editor as unknown as { _activeSub: { dispose(): void } })._activeSub =
-          activeSub;
+        revealLine(props.params.line);
       },
       (err) => setError(String(err)),
     );
@@ -70,11 +85,16 @@ export function EditorPane(props: IDockviewPanelProps<{ path: string }>) {
     return () => {
       disposed = true;
       observer?.disconnect();
-      (editor as unknown as { _activeSub?: { dispose(): void } })?._activeSub?.dispose();
-      editor?.dispose();
-      model?.dispose();
+      activeSub?.dispose();
+      editorRef.current?.dispose();
+      editorRef.current = null;
+      // model intentionally kept: reopening restores dirty edits + undo stack
     };
   }, []);
+
+  useEffect(() => {
+    revealLine(props.params.line);
+  }, [props.params.line, props.params.nonce]);
 
   return (
     <div className="editor-pane">

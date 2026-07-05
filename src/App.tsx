@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   DockviewApi,
   DockviewReact,
   DockviewReadyEvent,
+  IDockviewHeaderActionsProps,
 } from "dockview-react";
 import { Titlebar } from "./chrome/Titlebar";
 import { Sidebar } from "./chrome/Sidebar";
@@ -11,6 +12,7 @@ import { StatusBar } from "./chrome/StatusBar";
 import { TerminalPane } from "./panes/TerminalPane";
 import { ChatPane } from "./panes/ChatPane";
 import { EditorPane } from "./panes/EditorPane";
+import { DiffPane } from "./panes/DiffPane";
 import { bus } from "./bus";
 import "dockview-react/dist/styles/dockview.css";
 import "./App.css";
@@ -19,6 +21,28 @@ const components = {
   terminal: TerminalPane,
   chat: ChatPane,
   editor: EditorPane,
+  diff: DiffPane,
+};
+
+const isEditorish = (id: string) =>
+  id.startsWith("editor:") || id.startsWith("diff:");
+
+// "⌘\ dock" chip in the tab bar of groups holding editor panes
+function DockChip(props: IDockviewHeaderActionsProps) {
+  if (!props.panels.some((p) => isEditorish(p.id))) return null;
+  return (
+    <div className="dock-chip" onClick={() => bus.collapseEditor()} title="Collapse editor  ⌘\">
+      <span className="dock-chip-key">⌘\</span> dock
+    </div>
+  );
+}
+
+type RailFile = {
+  id: string;
+  component: string;
+  title: string;
+  params: Record<string, unknown>;
+  active: boolean;
 };
 
 let termSeq = 0;
@@ -66,7 +90,7 @@ function handleKey(api: DockviewApi, e: KeyboardEvent): (() => void) | null {
       return () => {
         const p = api.activePanel;
         // terminals and editor tabs close; the chat pane is the main stage
-        if (p?.id.startsWith("terminal-") || p?.id.startsWith("editor:")) {
+        if (p && (p.id.startsWith("terminal-") || isEditorish(p.id))) {
           p.api.close();
         }
       };
@@ -90,8 +114,89 @@ function handleKey(api: DockviewApi, e: KeyboardEvent): (() => void) | null {
   return null;
 }
 
+function EditorRail(props: {
+  files: RailFile[];
+  onRestore: (activateId?: string) => void;
+}) {
+  return (
+    <div
+      className="editor-rail"
+      title="Expand editor  ⌘\"
+      onClick={() => props.onRestore()}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.7">
+        <line x1="20" y1="5" x2="20" y2="19" />
+        <path d="M4 6l6 6-6 6" />
+      </svg>
+      <div className="rail-label">Editor</div>
+      <div className="rail-files">
+        {props.files.map((f) => (
+          <div
+            key={f.id}
+            className="rail-file"
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onRestore(f.id);
+            }}
+          >
+            <span
+              className={`rail-dot ${f.title.startsWith("●") ? "rail-dot-dirty" : ""}`}
+            />
+            <div className="rail-file-name">{f.title.replace(/^● /, "")}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const apiRef = useRef<DockviewApi | null>(null);
+  const [rail, setRail] = useState<RailFile[] | null>(null);
+  const railRef = useRef(rail);
+  railRef.current = rail;
+
+  const restoreEditors = (activateId?: string) => {
+    const api = apiRef.current;
+    const files = railRef.current;
+    if (!api || !files) return;
+    setRail(null);
+    const chat = api.getPanel("chat");
+    let first: string | undefined;
+    for (const f of files) {
+      api.addPanel({
+        id: f.id,
+        component: f.component,
+        title: f.title,
+        params: f.params,
+        position: first
+          ? { referencePanel: first, direction: "within" }
+          : chat
+            ? { referencePanel: chat, direction: "right" }
+            : undefined,
+      });
+      first = first ?? f.id;
+    }
+    const target = activateId ?? files.find((f) => f.active)?.id ?? first;
+    if (target) api.getPanel(target)?.api.setActive();
+  };
+
+  const collapseEditors = () => {
+    const api = apiRef.current;
+    if (!api || railRef.current) return;
+    const editors = api.panels.filter((p) => isEditorish(p.id));
+    if (editors.length === 0) return;
+    const files: RailFile[] = editors.map((p) => ({
+      id: p.id,
+      component: p.id.startsWith("diff:") ? "diff" : "editor",
+      title: p.title ?? p.id,
+      params: (p.params ?? {}) as Record<string, unknown>,
+      active: api.activePanel === p,
+    }));
+    // chat recenters automatically: it keeps its 760px reading measure
+    for (const p of editors) api.removePanel(p);
+    setRail(files);
+  };
 
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
@@ -107,20 +212,43 @@ function App() {
       });
       return panel;
     };
-    bus.openFile = (path) => {
+    bus.collapseEditor = collapseEditors;
+    bus.openFile = (path, line) => {
+      restoreEditors();
       const id = `editor:${path}`;
       const existing = event.api.getPanel(id);
       if (existing) {
+        if (line != null) {
+          existing.api.updateParameters({ path, line, nonce: Date.now() });
+        }
         existing.api.setActive();
         return;
       }
       const chat = event.api.getPanel("chat");
-      const anyEditor = event.api.panels.find((p) => p.id.startsWith("editor:"));
+      const anyEditor = event.api.panels.find((p) => isEditorish(p.id));
       event.api.addPanel({
         id,
         component: "editor",
         title: path.split("/").pop() ?? path,
-        params: { path },
+        params: { path, line },
+        position: anyEditor
+          ? { referencePanel: anyEditor, direction: "within" }
+          : chat
+            ? { referencePanel: chat, direction: "right" }
+            : undefined,
+      });
+    };
+    bus.openDiff = (path, oldText, newText) => {
+      restoreEditors();
+      const id = `diff:${path}`;
+      event.api.getPanel(id)?.api.close();
+      const chat = event.api.getPanel("chat");
+      const anyEditor = event.api.panels.find((p) => isEditorish(p.id));
+      event.api.addPanel({
+        id,
+        component: "diff",
+        title: `Δ ${path.split("/").pop() ?? path}`,
+        params: { path, oldText, newText },
         position: anyEditor
           ? { referencePanel: anyEditor, direction: "within" }
           : chat
@@ -151,6 +279,13 @@ function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       const api = apiRef.current;
       if (!api) return;
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.code === "Backslash") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (railRef.current) restoreEditors();
+        else collapseEditors();
+        return;
+      }
       const action = handleKey(api, e);
       if (action) {
         e.preventDefault();
@@ -171,8 +306,10 @@ function App() {
         <DockviewReact
           className="dockview-theme-dark app-dock"
           components={components}
+          rightHeaderActionsComponent={DockChip}
           onReady={onReady}
         />
+        {rail && <EditorRail files={rail} onRestore={restoreEditors} />}
       </div>
       <StatusBar />
     </>

@@ -246,6 +246,111 @@
   color: var(--text-4);
 }
 
+/* ============ chat file refs + diff open link ============ */
+.chat-md code.chat-file-ref {
+  color: var(--accent);
+  cursor: pointer;
+  background: var(--surface-2);
+}
+
+.chat-md code.chat-file-ref:hover {
+  text-decoration: underline;
+}
+
+.diff-open {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  cursor: pointer;
+  flex: none;
+}
+
+.diff-open:hover {
+  color: var(--accent-bright);
+}
+
+/* ============ editor rail (collapsed) ============ */
+.dock-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  margin-right: 8px;
+  padding: 1px 6px;
+  font-size: var(--fs-2xs);
+  color: var(--text-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dock-chip:hover {
+  color: var(--text-2);
+  border-color: var(--border-strong);
+}
+
+.editor-rail {
+  flex: 0 0 50px;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 11px 0;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.rail-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: var(--fs-2xs);
+  letter-spacing: 2px;
+  color: var(--text-4);
+  text-transform: uppercase;
+}
+
+.rail-files {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  margin-top: 6px;
+}
+
+.rail-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.rail-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+
+.rail-dot-dirty {
+  background: var(--accent);
+}
+
+.rail-file-name {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.rail-file:hover .rail-file-name {
+  color: var(--text-1);
+}
+
 /* ============ editor pane ============ */
 .editor-pane {
   width: 100%;

@@ -1,5 +1,6 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { mdComponents } from "./mdComponents";
 
 export type SubAgent = {
   id: string;
@@ -132,7 +133,7 @@ export function DrillBody({ sub }: { sub: SubAgent }) {
       </div>
       {sub.transcript.length > 0 ? (
         <div className="chat-md drill-transcript">
-          <Markdown remarkPlugins={[remarkGfm]}>
+          <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
             {sub.transcript.join("\n\n")}
           </Markdown>
         </div>
