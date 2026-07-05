@@ -27,14 +27,25 @@ const components = {
 const isEditorish = (id: string) =>
   id.startsWith("editor:") || id.startsWith("diff:");
 
-// "⌘\ dock" chip in the tab bar of groups holding editor panes
+const isTerminalId = (id: string) => id.startsWith("terminal-");
+
+// tab-bar chips: "⌘\ dock" on editor groups, "⌄" toggle on terminal groups
 function DockChip(props: IDockviewHeaderActionsProps) {
-  if (!props.panels.some((p) => isEditorish(p.id))) return null;
-  return (
-    <div className="dock-chip" onClick={() => bus.collapseEditor()} title="Collapse editor  ⌘\">
-      <span className="dock-chip-key">⌘\</span> dock
-    </div>
-  );
+  if (props.panels.some((p) => isEditorish(p.id))) {
+    return (
+      <div className="dock-chip" onClick={() => bus.collapseEditor()} title="Collapse editor  ⌘\">
+        <span className="dock-chip-key">⌘\</span> dock
+      </div>
+    );
+  }
+  if (props.panels.length > 0 && props.panels.every((p) => isTerminalId(p.id))) {
+    return (
+      <div className="dock-chip" onClick={() => bus.toggleTerminal()} title="Toggle terminal panel  ⌘J">
+        ⌄
+      </div>
+    );
+  }
+  return null;
 }
 
 type RailFile = {
@@ -181,6 +192,28 @@ function App() {
     if (target) api.getPanel(target)?.api.setActive();
   };
 
+  // terminal groups shrink to their 30px tab bar instead of closing: the
+  // PTYs (and anything running in them) stay alive
+  const termHeights = useRef(new Map<string, number>());
+  const toggleTerminal = () => {
+    const api = apiRef.current;
+    if (!api) return;
+    const groups = api.groups.filter(
+      (g) => g.panels.length > 0 && g.panels.every((p) => isTerminalId(p.id)),
+    );
+    if (groups.length === 0) return;
+    const collapsed = groups.every((g) => g.height <= 40);
+    for (const g of groups) {
+      if (collapsed) {
+        g.api.setSize({ height: termHeights.current.get(g.id) ?? 240 });
+      } else {
+        termHeights.current.set(g.id, g.height);
+        g.api.setConstraints({ minimumHeight: 30 });
+        g.api.setSize({ height: 30 });
+      }
+    }
+  };
+
   const collapseEditors = () => {
     const api = apiRef.current;
     if (!api || railRef.current) return;
@@ -213,6 +246,7 @@ function App() {
       return panel;
     };
     bus.collapseEditor = collapseEditors;
+    bus.toggleTerminal = toggleTerminal;
     bus.openFile = (path, line) => {
       restoreEditors();
       const id = `editor:${path}`;
@@ -256,12 +290,6 @@ function App() {
             : undefined,
       });
     };
-    // the cockpit always keeps at least one terminal alive
-    event.api.onDidRemovePanel(() => {
-      if (!event.api.panels.some((p) => p.id.startsWith("terminal-"))) {
-        spawnTerminalBelowChat();
-      }
-    });
     // reap PTYs/agents orphaned by a webview reload before spawning ours
     Promise.allSettled([invoke("pty_reset"), invoke("acp_reset")]).finally(
       () => {
@@ -284,6 +312,16 @@ function App() {
         e.stopPropagation();
         if (railRef.current) restoreEditors();
         else collapseEditors();
+        return;
+      }
+      const cmdJ =
+        e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.code === "KeyJ";
+      const ctrlBacktick =
+        e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && e.code === "Backquote";
+      if (cmdJ || ctrlBacktick) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleTerminal();
         return;
       }
       const action = handleKey(api, e);

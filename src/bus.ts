@@ -4,4 +4,5 @@ export const bus = {
   openFile: (_path: string, _line?: number) => {},
   openDiff: (_path: string, _oldText: string, _newText: string) => {},
   collapseEditor: () => {},
+  toggleTerminal: () => {},
 };
