@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { IDockviewPanelProps } from "dockview-react";
-import { monaco } from "../monacoSetup";
+import { ensureShorikaiTheme, monaco } from "../monacoSetup";
 
 // Saved-version bookkeeping survives pane unmounts (e.g. rail collapse):
 // models are kept alive so dirty edits and undo history come back.
@@ -23,6 +23,7 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
   };
 
   useEffect(() => {
+    ensureShorikaiTheme();
     const path = props.params.path;
     const name = path.split("/").pop() ?? path;
     let observer: ResizeObserver | undefined;

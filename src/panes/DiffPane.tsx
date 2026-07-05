@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { IDockviewPanelProps } from "dockview-react";
-import { monaco } from "../monacoSetup";
+import { ensureShorikaiTheme, monaco } from "../monacoSetup";
 
 function langForPath(path: string): string | undefined {
   const ext = "." + (path.split(".").pop() ?? "");
@@ -15,6 +15,7 @@ export function DiffPane(
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    ensureShorikaiTheme();
     const lang = langForPath(props.params.path);
     const original = monaco.editor.createModel(props.params.oldText, lang);
     const modified = monaco.editor.createModel(props.params.newText, lang);
