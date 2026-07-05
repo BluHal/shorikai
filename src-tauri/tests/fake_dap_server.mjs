@@ -50,9 +50,34 @@ const server = net.createServer((sock) => {
         respond(req, {
           stackFrames: [
             { id: 1, name: "main", line: 7, column: 1, source: { path: "/tmp/fake/app.js" } },
+            { id: 2, name: "caller", line: 21, column: 1, source: { path: "/tmp/fake/lib.js" } },
           ],
-          totalFrames: 1,
+          totalFrames: 2,
         });
+        break;
+      case "scopes":
+        respond(req, {
+          scopes: [{ name: "Locals", variablesReference: 100, expensive: false }],
+        });
+        break;
+      case "variables":
+        respond(req, {
+          variables:
+            req.arguments.variablesReference === 100
+              ? [
+                  { name: "x", value: "42", type: "number", variablesReference: 0 },
+                  { name: "obj", value: "Object", type: "object", variablesReference: 101 },
+                ]
+              : [{ name: "y", value: '"hi"', type: "string", variablesReference: 0 }],
+        });
+        break;
+      case "evaluate":
+        respond(req, { result: `=${req.arguments.expression}`, variablesReference: 0 });
+        break;
+      case "next":
+        respond(req);
+        event("continued", { threadId: 1 });
+        setTimeout(() => event("stopped", { reason: "step", threadId: 1 }), 30);
         break;
       case "continue":
         respond(req, { allThreadsContinued: true });

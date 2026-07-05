@@ -47,6 +47,7 @@ export type WorkspaceHandlers = {
     title: string;
     dapReply: { sessionId: number; requestSeq: number };
   }) => void;
+  openDebugPane: () => void;
 };
 const handlers = new Map<string, WorkspaceHandlers>();
 export const registerWorkspace = (root: string, h: WorkspaceHandlers) => {

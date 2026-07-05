@@ -231,6 +231,67 @@ fn dap_reset(core: State<std::sync::Arc<DapCore>>) {
 }
 
 #[tauri::command]
+fn dap_step(
+    core: State<std::sync::Arc<DapCore>>,
+    session_id: u32,
+    thread_id: i64,
+    kind: String,
+) -> Result<(), String> {
+    core.step(session_id, thread_id, &kind)
+}
+
+#[tauri::command]
+async fn dap_stack_trace(
+    core: State<'_, std::sync::Arc<DapCore>>,
+    session_id: u32,
+    thread_id: i64,
+) -> Result<Value, String> {
+    let core = std::sync::Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.stack_trace(session_id, thread_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn dap_scopes(
+    core: State<'_, std::sync::Arc<DapCore>>,
+    session_id: u32,
+    frame_id: i64,
+) -> Result<Value, String> {
+    let core = std::sync::Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.scopes(session_id, frame_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn dap_variables(
+    core: State<'_, std::sync::Arc<DapCore>>,
+    session_id: u32,
+    variables_reference: i64,
+) -> Result<Value, String> {
+    let core = std::sync::Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.variables(session_id, variables_reference))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn dap_evaluate(
+    core: State<'_, std::sync::Arc<DapCore>>,
+    session_id: u32,
+    expression: String,
+    frame_id: Option<i64>,
+) -> Result<Value, String> {
+    let core = std::sync::Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || {
+        core.evaluate(session_id, &expression, frame_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn lsp_servers() -> Result<Value, String> {
     lsp_host::load_server_config()
 }
@@ -342,6 +403,11 @@ pub fn run() {
             dap_set_breakpoints,
             dap_continue,
             dap_reset,
+            dap_step,
+            dap_stack_trace,
+            dap_scopes,
+            dap_variables,
+            dap_evaluate,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -11,7 +11,9 @@ import {
   continuePaused,
   dismissDebugError,
   getDebug,
+  pauseRunning,
   startDebugTerminal,
+  step,
   subscribeDebug,
   wireDebug,
 } from "./debug";
@@ -98,8 +100,11 @@ function handleKey(e: KeyboardEvent): (() => void) | null {
     if (key === "KeyW")
       return () => {
         const p = api.activePanel;
-        // terminals and editor tabs close; the chat pane is the main stage
-        if (p && (p.id.startsWith("terminal-") || isEditorish(p.id))) {
+        // terminals, editors, and the debug pane close; chat is the main stage
+        if (
+          p &&
+          (p.id.startsWith("terminal-") || p.id === "debug" || isEditorish(p.id))
+        ) {
           p.api.close();
         }
       };
@@ -145,9 +150,21 @@ function App() {
       wireDebug();
     })();
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "F5" && getDebug().paused) {
+      const dbg = getDebug();
+      if (e.code === "F5" && dbg.paused) {
         e.preventDefault();
         continuePaused();
+        return;
+      }
+      if (e.code === "F6" && !dbg.paused) {
+        e.preventDefault();
+        pauseRunning();
+        return;
+      }
+      if (dbg.paused && ["F10", "F11"].includes(e.code)) {
+        e.preventDefault();
+        if (e.code === "F10") step("next");
+        else step(e.shiftKey ? "stepOut" : "stepIn");
         return;
       }
       const action = handleKey(e);

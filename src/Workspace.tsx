@@ -11,6 +11,7 @@ import { TerminalPane } from "./panes/TerminalPane";
 import { ChatPane } from "./panes/ChatPane";
 import { EditorPane } from "./panes/EditorPane";
 import { DiffPane } from "./panes/DiffPane";
+import { DebugPane } from "./panes/DebugPane";
 import { bus } from "./bus";
 import {
   ProjectCtx,
@@ -25,11 +26,14 @@ const components = {
   chat: ChatPane,
   editor: EditorPane,
   diff: DiffPane,
+  debug: DebugPane,
 };
 
 export const isEditorish = (id: string) =>
   id.startsWith("editor:") || id.startsWith("diff:");
 const isTerminalId = (id: string) => id.startsWith("terminal-");
+// the bottom panel group: terminals plus the debug pane
+const isBottomId = (id: string) => isTerminalId(id) || id === "debug";
 
 // tab-bar chips: "⌘\ dock" on editor groups, "⌄" toggle on terminal groups
 function DockChip(props: IDockviewHeaderActionsProps) {
@@ -40,7 +44,7 @@ function DockChip(props: IDockviewHeaderActionsProps) {
       </div>
     );
   }
-  if (props.panels.length > 0 && props.panels.every((p) => isTerminalId(p.id))) {
+  if (props.panels.length > 0 && props.panels.every((p) => isBottomId(p.id))) {
     return (
       <div className="dock-chip-row">
         <div
@@ -170,7 +174,7 @@ export function Workspace(props: { root: string; visible: boolean }) {
     const api = apiRef.current;
     if (!api) return;
     const groups = api.groups.filter(
-      (g) => g.panels.length > 0 && g.panels.every((p) => isTerminalId(p.id)),
+      (g) => g.panels.length > 0 && g.panels.every((p) => isBottomId(p.id)),
     );
     if (groups.length === 0) return;
     const collapsed = groups.every((g) => g.height <= 40);
@@ -242,7 +246,7 @@ export function Workspace(props: { root: string; visible: boolean }) {
     const api = apiRef.current;
     if (!api) return;
     const termGroup = api.groups.find(
-      (g) => g.panels.length > 0 && g.panels.every((p) => isTerminalId(p.id)),
+      (g) => g.panels.length > 0 && g.panels.every((p) => isBottomId(p.id)),
     );
     const chat = api.getPanel("chat");
     api.addPanel({
@@ -262,6 +266,33 @@ export function Workspace(props: { root: string; visible: boolean }) {
     }
   };
 
+  const openDebugPane = () => {
+    const api = apiRef.current;
+    if (!api) return;
+    const existing = api.getPanel("debug");
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const termGroup = api.groups.find(
+      (g) => g.panels.length > 0 && g.panels.every((p) => isBottomId(p.id)),
+    );
+    const chat = api.getPanel("chat");
+    api.addPanel({
+      id: "debug",
+      component: "debug",
+      title: "debug",
+      position: termGroup
+        ? { referenceGroup: termGroup, direction: "within" }
+        : chat
+          ? { referencePanel: chat, direction: "below" }
+          : undefined,
+    });
+    if (termGroup && termGroup.height <= 40) {
+      termGroup.api.setSize({ height: termHeights.current.get(termGroup.id) ?? 240 });
+    }
+  };
+
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     registerWorkspace(root, {
@@ -272,6 +303,7 @@ export function Workspace(props: { root: string; visible: boolean }) {
       toggleEditor,
       toggleTerminal,
       addDebugTerminal,
+      openDebugPane,
     });
 
     let restored = false;

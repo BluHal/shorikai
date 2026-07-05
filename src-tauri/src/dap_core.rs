@@ -220,15 +220,96 @@ impl DapCore {
     }
 
     pub fn continue_(&self, session_id: u32, thread_id: i64) -> Result<(), String> {
-        let session = self
-            .sessions
+        let session = self.session(session_id)?;
+        session.request_forget("continue", json!({ "threadId": thread_id }));
+        Ok(())
+    }
+
+    fn session(&self, session_id: u32) -> Result<Arc<Session>, String> {
+        self.sessions
             .lock()
             .unwrap()
             .get(&session_id)
             .cloned()
-            .ok_or("no such debug session")?;
-        session.request_forget("continue", json!({ "threadId": thread_id }));
+            .ok_or_else(|| "no such debug session".into())
+    }
+
+    fn request_sync(&self, session_id: u32, command: &str, args: Value) -> Result<Value, String> {
+        let session = self.session(session_id)?;
+        let rx = session.request(command, args)?;
+        rx.recv_timeout(REQUEST_TIMEOUT)
+            .map_err(|_| format!("debug adapter did not answer {command}"))
+    }
+
+    /// step kind: next | stepIn | stepOut | pause
+    pub fn step(&self, session_id: u32, thread_id: i64, kind: &str) -> Result<(), String> {
+        if !matches!(kind, "next" | "stepIn" | "stepOut" | "pause") {
+            return Err(format!("unknown step kind {kind:?}"));
+        }
+        let session = self.session(session_id)?;
+        session.request_forget(kind, json!({ "threadId": thread_id }));
         Ok(())
+    }
+
+    /// full stack, normalized to id/name/path/line per frame
+    pub fn stack_trace(&self, session_id: u32, thread_id: i64) -> Result<Value, String> {
+        let res = self.request_sync(
+            session_id,
+            "stackTrace",
+            json!({ "threadId": thread_id, "startFrame": 0, "levels": 40 }),
+        )?;
+        let frames: Vec<Value> = res
+            .pointer("/body/stackFrames")
+            .and_then(|f| f.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|f| {
+                        json!({
+                            "id": f.get("id"),
+                            "name": f.get("name"),
+                            "path": f.pointer("/source/path"),
+                            "line": f.get("line"),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Value::Array(frames))
+    }
+
+    pub fn scopes(&self, session_id: u32, frame_id: i64) -> Result<Value, String> {
+        let res = self.request_sync(session_id, "scopes", json!({ "frameId": frame_id }))?;
+        Ok(res.pointer("/body/scopes").cloned().unwrap_or(json!([])))
+    }
+
+    pub fn variables(&self, session_id: u32, variables_reference: i64) -> Result<Value, String> {
+        let res = self.request_sync(
+            session_id,
+            "variables",
+            json!({ "variablesReference": variables_reference }),
+        )?;
+        Ok(res.pointer("/body/variables").cloned().unwrap_or(json!([])))
+    }
+
+    pub fn evaluate(
+        &self,
+        session_id: u32,
+        expression: &str,
+        frame_id: Option<i64>,
+    ) -> Result<Value, String> {
+        let res = self.request_sync(
+            session_id,
+            "evaluate",
+            json!({ "expression": expression, "frameId": frame_id, "context": "repl" }),
+        )?;
+        if res.get("success").and_then(|s| s.as_bool()) == Some(false) {
+            return Err(res
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("evaluation failed")
+                .to_owned());
+        }
+        Ok(res.get("body").cloned().unwrap_or(Value::Null))
     }
 
     pub fn stop_all(&self) {
@@ -627,5 +708,93 @@ mod tests {
             }
         }
         let _ = adapter.kill();
+    }
+
+    fn wait_stop(rx: &mpsc::Receiver<DapEvent>) -> i64 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()).expect("no stop") {
+                DapEvent::Stopped { thread_id, .. } => return thread_id,
+                DapEvent::Error { message } => panic!("error: {message}"),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn step_stack_variables_evaluate_round_trip() {
+        let (mut adapter, port) = spawn_fake_adapter();
+        let (tx, rx) = mpsc::channel();
+        let core = DapCore::new(move |e| {
+            tx.send(e).ok();
+        });
+        core.set_breakpoints("/tmp/fake/app.js", vec![7]);
+        let sid = core
+            .start_session(port, "launch", json!({ "type": "fake" }))
+            .unwrap();
+        let thread = wait_stop(&rx);
+
+        let frames = core.stack_trace(sid, thread).unwrap();
+        assert_eq!(frames[0]["path"], "/tmp/fake/app.js");
+        assert_eq!(frames[1]["name"], "caller");
+        assert_eq!(frames[1]["line"], 21);
+
+        let scopes = core.scopes(sid, frames[0]["id"].as_i64().unwrap()).unwrap();
+        assert_eq!(scopes[0]["name"], "Locals");
+        let vars = core
+            .variables(sid, scopes[0]["variablesReference"].as_i64().unwrap())
+            .unwrap();
+        assert_eq!(vars[0]["name"], "x");
+        assert_eq!(vars[0]["value"], "42");
+        // nested expansion
+        let nested = core
+            .variables(sid, vars[1]["variablesReference"].as_i64().unwrap())
+            .unwrap();
+        assert_eq!(nested[0]["name"], "y");
+
+        let eval = core.evaluate(sid, "1+1", Some(1)).unwrap();
+        assert_eq!(eval["result"], "=1+1");
+
+        // step over: continued, then stopped again
+        core.step(sid, thread, "next").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()).expect("no continued") {
+                DapEvent::Continued { .. } => break,
+                _ => {}
+            }
+        }
+        wait_stop(&rx);
+        let _ = adapter.kill();
+    }
+
+    #[test]
+    fn adapter_crash_ends_session() {
+        let (mut adapter, port) = spawn_fake_adapter();
+        let (tx, rx) = mpsc::channel();
+        let core = DapCore::new(move |e| {
+            tx.send(e).ok();
+        });
+        core.set_breakpoints("/tmp/fake/app.js", vec![7]);
+        let sid = core
+            .start_session(port, "launch", json!({ "type": "fake" }))
+            .unwrap();
+        wait_stop(&rx);
+
+        adapter.kill().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()).expect("no session end") {
+                DapEvent::SessionEnded { session_id } => {
+                    assert_eq!(session_id, sid);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            core.stack_trace(sid, 1).is_err(),
+            "dead session must error, not hang"
+        );
     }
 }
