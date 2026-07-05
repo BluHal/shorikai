@@ -1,12 +1,39 @@
 // Fake scripted ACP agent for acp-bridge tests: speaks canned JSON-RPC
-// (ndjson over stdio). Prompt "garbage" injects a malformed line first.
+// (ndjson over stdio). Behavior is keyed off the prompt text:
+//   "garbage"    — injects a malformed line before streaming
+//   "tools"      — emits tool_call / tool_call_update pairs, one with a diff
+//   "permission" — requests permission, echoes the outcome, then ends the turn
 import readline from "node:readline";
 
 const send = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
-const rl = readline.createInterface({ input: process.stdin });
+const update = (update) =>
+  send({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: { sessionId: "sess_fake", update },
+  });
+const chunk = (text) =>
+  update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
 
+const PERMISSION_RPC_ID = 9001;
+let pendingPromptId = null;
+
+const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", (line) => {
   const msg = JSON.parse(line);
+
+  // response to our permission request
+  if (msg.method === undefined && msg.id === PERMISSION_RPC_ID) {
+    const outcome = msg.result?.outcome;
+    chunk(
+      outcome?.outcome === "selected"
+        ? `approved:${outcome.optionId}`
+        : "cancelled",
+    );
+    send({ jsonrpc: "2.0", id: pendingPromptId, result: { stopReason: "end_turn" } });
+    return;
+  }
+
   switch (msg.method) {
     case "initialize":
       send({
@@ -19,22 +46,65 @@ rl.on("line", (line) => {
       send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "sess_fake" } });
       break;
     case "session/prompt": {
-      if (msg.params.prompt[0].text === "garbage") {
-        process.stdout.write("this is not json\n");
+      const text = msg.params.prompt[0].text;
+      if (text === "tools") {
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "call_1",
+          title: "Read package.json",
+          kind: "read",
+          status: "in_progress",
+          rawInput: { path: "package.json" },
+        });
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "call_1",
+          status: "completed",
+          content: [
+            { type: "content", content: { type: "text", text: '{ "name": "demo" }' } },
+          ],
+        });
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "call_2",
+          title: "Edit src/app.ts",
+          kind: "edit",
+          status: "in_progress",
+          content: [
+            {
+              type: "diff",
+              path: "src/app.ts",
+              oldText: "const a = 1;\n",
+              newText: "const a = 2;\n",
+            },
+          ],
+        });
+        update({ sessionUpdate: "tool_call_update", toolCallId: "call_2", status: "completed" });
+        chunk("done");
+        send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+        break;
       }
-      for (const text of ["Hel", "lo ", "world"]) {
+      if (text === "permission") {
+        pendingPromptId = msg.id;
         send({
           jsonrpc: "2.0",
-          method: "session/update",
+          id: PERMISSION_RPC_ID,
+          method: "session/request_permission",
           params: {
             sessionId: "sess_fake",
-            update: {
-              sessionUpdate: "agent_message_chunk",
-              content: { type: "text", text },
-            },
+            toolCall: { toolCallId: "call_3", title: "Run npm test" },
+            options: [
+              { optionId: "allow", name: "Allow", kind: "allow_once" },
+              { optionId: "deny", name: "Deny", kind: "reject_once" },
+            ],
           },
         });
+        break;
       }
+      if (text === "garbage") {
+        process.stdout.write("this is not json\n");
+      }
+      for (const t of ["Hel", "lo ", "world"]) chunk(t);
       send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
       break;
     }

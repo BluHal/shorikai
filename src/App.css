@@ -376,10 +376,214 @@
   color: var(--text-2);
 }
 
-.chat-activity {
-  font-size: var(--fs-xs);
+.chat-working {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: ckpt-spin 0.8s linear infinite;
+}
+
+/* ============ tool-call cards ============ */
+.tool-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.tool-card-live {
+  border-color: var(--accent-border);
+}
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-icon {
+  display: flex;
+  color: var(--text-3);
+  flex: none;
+}
+
+.tool-card-live .tool-icon {
+  color: var(--accent);
+}
+
+.tool-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-card-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.tool-chevron {
   color: var(--text-4);
-  animation: ckpt-pulse 1.4s ease-in-out infinite;
+  font-size: var(--fs-2xs);
+}
+
+.tool-status-ok {
+  color: var(--success);
+}
+
+.tool-status-fail {
+  color: var(--error);
+}
+
+.tool-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: ckpt-spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+.tool-card-body {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface-1);
+}
+
+.tool-output {
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-xs);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-2);
+  overflow: auto;
+  max-height: 260px;
+  white-space: pre-wrap;
+}
+
+.tool-raw {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-raw-label {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--text-4);
+}
+
+/* ============ diff cards ============ */
+.diff-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.diff-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 13px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+
+.diff-ext {
+  color: var(--syn-type);
+}
+
+.diff-name {
+  color: var(--text-1);
+}
+
+.diff-adds {
+  color: var(--git-added);
+}
+
+.diff-dels {
+  color: var(--git-deleted);
+}
+
+.diff-cols {
+  display: flex;
+  font-size: 11px;
+  line-height: 17px;
+  max-height: 340px;
+  overflow: auto;
+}
+
+.diff-col {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 5px;
+}
+
+.diff-col-left {
+  border-right: 1px solid var(--border);
+}
+
+.diff-col-label {
+  padding: 4px 12px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.diff-label-del {
+  color: var(--git-deleted);
+}
+
+.diff-label-add {
+  color: var(--git-added);
+}
+
+.diff-line {
+  padding: 0 10px;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--syn-plain);
+}
+
+.diff-del {
+  background: var(--diff-del-bg);
+  box-shadow: inset 2px 0 0 var(--git-deleted);
+}
+
+.diff-add {
+  background: var(--diff-add-bg);
+  box-shadow: inset 2px 0 0 var(--git-added);
+}
+
+.diff-empty {
+  color: var(--text-4);
+}
+
+.diff-skip {
+  color: var(--text-4);
+  background: var(--surface-1);
 }
 
 .chat-system {
@@ -407,6 +611,16 @@
   border-color: var(--border);
   color: var(--text-4);
   cursor: default;
+}
+
+.chat-permission-options button.chat-permission-reject {
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+
+.chat-permission-options button.chat-permission-reject:disabled {
+  border-color: var(--border);
+  color: var(--text-4);
 }
 
 .chat-permission-options button.chat-permission-chosen:disabled {

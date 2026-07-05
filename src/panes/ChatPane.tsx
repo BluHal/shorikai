@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ToolCard, ToolContentItem, ToolRow } from "./ToolCard";
 
 type PermissionOption = { optionId: string; name: string; kind?: string };
 
@@ -10,6 +11,7 @@ type Row =
   | { kind: "user"; text: string }
   | { kind: "agent"; text: string; done: boolean }
   | { kind: "system"; text: string; restart?: boolean }
+  | ToolRow
   | {
       kind: "permission";
       requestId: unknown;
@@ -17,6 +19,51 @@ type Row =
       options: PermissionOption[];
       decided?: string;
     };
+
+type ToolUpdate = {
+  sessionUpdate?: string;
+  toolCallId?: string;
+  title?: string;
+  kind?: string;
+  status?: string;
+  content?: ToolContentItem[];
+  rawInput?: unknown;
+  rawOutput?: unknown;
+};
+
+function applyToolUpdate(rows: Row[], u: ToolUpdate): Row[] {
+  const existing = rows.some(
+    (r) => r.kind === "tool" && r.id === u.toolCallId,
+  );
+  if (u.sessionUpdate === "tool_call" && !existing) {
+    return [
+      ...rows,
+      {
+        kind: "tool",
+        id: u.toolCallId ?? "",
+        title: u.title ?? u.toolCallId ?? "tool call",
+        toolKind: u.kind ?? "other",
+        status: u.status ?? "pending",
+        content: u.content ?? [],
+        rawInput: u.rawInput,
+        rawOutput: u.rawOutput,
+      },
+    ];
+  }
+  return rows.map((r) =>
+    r.kind === "tool" && r.id === u.toolCallId
+      ? {
+          ...r,
+          title: u.title ?? r.title,
+          toolKind: u.kind ?? r.toolKind,
+          status: u.status ?? r.status,
+          content: u.content ?? r.content,
+          rawInput: u.rawInput ?? r.rawInput,
+          rawOutput: u.rawOutput ?? r.rawOutput,
+        }
+      : r,
+  );
+}
 
 type AcpEvent = {
   kind:
@@ -31,7 +78,7 @@ type AcpEvent = {
     | "error";
   agent_id: number;
   text?: string;
-  update?: { title?: string; sessionUpdate?: string };
+  update?: ToolUpdate;
   request_id?: unknown;
   request?: {
     toolCall?: { title?: string };
@@ -49,7 +96,6 @@ const AGENT = "claude-code";
 export function ChatPane() {
   const [rows, setRows] = useState<Row[]>([]);
   const [status, setStatus] = useState<Status>("starting");
-  const [activity, setActivity] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const agentIdRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -92,7 +138,10 @@ export function ChatPane() {
           });
           break;
         case "tool_call":
-          if (ev.update?.title) setActivity(ev.update.title);
+          if (ev.update) {
+            const u = ev.update;
+            setRows((r) => applyToolUpdate(r, u));
+          }
           break;
         case "permission_request":
           setRows((r) => [
@@ -107,18 +156,14 @@ export function ChatPane() {
           break;
         case "turn_ended":
           setRows((r) =>
-            r.map((row, i) =>
-              i === r.length - 1 && row.kind === "agent"
-                ? { ...row, done: true }
-                : row,
+            r.map((row) =>
+              row.kind === "agent" && !row.done ? { ...row, done: true } : row,
             ),
           );
-          setActivity(null);
           setStatus("ready");
           break;
         case "agent_exit":
           setStatus("dead");
-          setActivity(null);
           setRows((r) => [
             ...r,
             {
@@ -148,7 +193,7 @@ export function ChatPane() {
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [rows, activity]);
+  }, [rows]);
 
   const send = () => {
     const text = input.trim();
@@ -223,6 +268,8 @@ export function ChatPane() {
                     )}
                   </div>
                 );
+              case "tool":
+                return <ToolCard key={row.id} row={row} />;
               case "permission":
                 return (
                   <div key={i} className="chat-permission">
@@ -232,11 +279,10 @@ export function ChatPane() {
                         <button
                           key={o.optionId}
                           disabled={row.decided != null}
-                          className={
-                            row.decided === o.optionId
-                              ? "chat-permission-chosen"
-                              : ""
-                          }
+                          className={[
+                            o.kind?.startsWith("reject") ? "chat-permission-reject" : "",
+                            row.decided === o.optionId ? "chat-permission-chosen" : "",
+                          ].join(" ")}
                           onClick={() => decide(row, o.optionId)}
                         >
                           {o.name}
@@ -247,7 +293,7 @@ export function ChatPane() {
                 );
             }
           })}
-          {activity && <div className="chat-activity">{activity}…</div>}
+          {status === "busy" && <div className="chat-working" />}
         </div>
       </div>
 

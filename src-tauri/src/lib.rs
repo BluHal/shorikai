@@ -126,6 +126,12 @@ pub fn run() {
             acp_kill,
             acp_reset,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<PtyHost>().kill_all();
+                app.state::<AcpBridge>().kill_all();
+            }
+        });
 }

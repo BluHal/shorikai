@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -100,6 +101,9 @@ impl AcpBridge {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
+            // own process group, so kill() reaches wrapper-spawned
+            // grandchildren (npx -> node adapter) and EOF/reap still fire
+            .process_group(0)
             .spawn()
             .map_err(|e| format!("failed to spawn {}: {e}", config.command))?;
         let stdin = child.stdin.take().unwrap();
@@ -219,15 +223,23 @@ impl AcpBridge {
     pub fn kill(&self, agent_id: u32) -> Result<(), String> {
         let mut agents = self.agents.lock().unwrap();
         let a = agents.get_mut(&agent_id).ok_or("no such agent")?;
-        a.child.kill().map_err(|e| e.to_string())
+        kill_group(&mut a.child);
+        Ok(())
     }
 
     /// See PtyHost::kill_all — reaps agents orphaned by a webview reload.
     pub fn kill_all(&self) {
         for a in self.agents.lock().unwrap().values_mut() {
-            let _ = a.child.kill();
+            kill_group(&mut a.child);
         }
     }
+}
+
+fn kill_group(child: &mut Child) {
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    let _ = child.kill(); // in case the group was already gone
 }
 
 fn handshake(agent_id: u32, cwd: &str, agents: &Agents) -> Result<(), String> {
@@ -457,6 +469,107 @@ mod tests {
                     break;
                 }
                 _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn tool_call_and_diff_normalization() {
+        let (bridge, rx, id) = start_ready();
+        bridge.prompt(id, "tools").unwrap();
+        let (text, others) = drain_turn(&rx);
+        assert_eq!(text, "done");
+
+        let updates: Vec<&Value> = others
+            .iter()
+            .filter_map(|e| match e {
+                AcpEvent::ToolCall { update, .. } => Some(update),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(updates.len(), 4, "expected 4 tool events: {others:?}");
+
+        assert_eq!(updates[0]["sessionUpdate"], "tool_call");
+        assert_eq!(updates[0]["toolCallId"], "call_1");
+        assert_eq!(updates[0]["kind"], "read");
+        assert_eq!(updates[0]["status"], "in_progress");
+
+        assert_eq!(updates[1]["sessionUpdate"], "tool_call_update");
+        assert_eq!(updates[1]["status"], "completed");
+        assert_eq!(
+            updates[1].pointer("/content/0/content/text").unwrap(),
+            "{ \"name\": \"demo\" }"
+        );
+
+        assert_eq!(updates[2]["kind"], "edit");
+        assert_eq!(updates[2].pointer("/content/0/type").unwrap(), "diff");
+        assert_eq!(
+            updates[2].pointer("/content/0/oldText").unwrap(),
+            "const a = 1;\n"
+        );
+        assert_eq!(
+            updates[2].pointer("/content/0/newText").unwrap(),
+            "const a = 2;\n"
+        );
+    }
+
+    #[test]
+    fn permission_round_trip() {
+        let (bridge, rx, id) = start_ready();
+        bridge.prompt(id, "permission").unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (request_id, request) = loop {
+            match rx.recv_timeout(deadline - Instant::now()).unwrap() {
+                AcpEvent::PermissionRequest {
+                    request_id,
+                    request,
+                    ..
+                } => break (request_id, request),
+                _ => {}
+            }
+        };
+        assert_eq!(request.pointer("/toolCall/title").unwrap(), "Run npm test");
+        assert_eq!(request.pointer("/options/0/optionId").unwrap(), "allow");
+
+        bridge
+            .respond_permission(id, request_id, Some("allow".into()))
+            .unwrap();
+        let (text, _) = drain_turn(&rx);
+        assert_eq!(text, "approved:allow", "agent did not proceed after approval");
+    }
+
+    #[test]
+    fn kill_reaches_wrapper_grandchildren() {
+        // agent behind a wrapper (like npx): sh forks node, which inherits
+        // the stdout pipe. Without a process-group kill, killing sh leaves
+        // node alive, EOF never fires, and this test times out.
+        let (tx, rx) = mpsc::channel();
+        let bridge = AcpBridge::new(move |e| {
+            tx.send(e).ok();
+        });
+        let wrapper = AgentConfig {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    "node {}/tests/fake_acp_agent.mjs",
+                    env!("CARGO_MANIFEST_DIR")
+                ),
+            ],
+        };
+        let id = bridge.start(&wrapper, "/tmp").unwrap();
+        match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+            AcpEvent::SessionReady { .. } => {}
+            other => panic!("expected SessionReady, got {other:?}"),
+        }
+        bridge.kill(id).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()) {
+                Ok(AcpEvent::AgentExit { .. }) => break,
+                Ok(_) => {}
+                Err(e) => panic!("no AgentExit after group kill: {e}"),
             }
         }
     }
