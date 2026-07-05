@@ -1,4 +1,5 @@
 mod acp_bridge;
+mod git_status;
 mod pty_host;
 mod workspace_index;
 
@@ -143,6 +144,31 @@ fn fs_write(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn git_status_cmd(root: String) -> Result<git_status::GitStatus, String> {
+    git_status::status(&root)
+}
+
+#[tauri::command]
+fn git_stage(root: String, path: String) -> Result<(), String> {
+    git_status::stage(&root, &path)
+}
+
+#[tauri::command]
+fn git_unstage(root: String, path: String) -> Result<(), String> {
+    git_status::unstage(&root, &path)
+}
+
+#[tauri::command]
+fn git_commit(root: String, message: String) -> Result<(), String> {
+    git_status::commit(&root, &message)
+}
+
+#[tauri::command]
+fn git_diff(root: String, path: String) -> Result<git_status::DiffTexts, String> {
+    git_status::diff_texts(&root, &path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -184,6 +210,11 @@ pub fn run() {
             ws_search,
             fs_read,
             fs_write,
+            git_status_cmd,
+            git_stage,
+            git_unstage,
+            git_commit,
+            git_diff,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

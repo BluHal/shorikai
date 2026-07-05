@@ -15,6 +15,7 @@ import { ChatPane } from "./panes/ChatPane";
 import { EditorPane } from "./panes/EditorPane";
 import { DiffPane } from "./panes/DiffPane";
 import { bus } from "./bus";
+import { startGitStore } from "./gitStore";
 import "dockview-react/dist/styles/dockview.css";
 import "./App.css";
 
@@ -336,6 +337,7 @@ function App() {
     };
     // capture phase: beat xterm to the keystroke
     window.addEventListener("keydown", onKeyDown, true);
+    startGitStore();
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
 

@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { bus } from "../bus";
+import { getGit, subscribeGit } from "../gitStore";
 
 type Entry = { name: string; path: string; is_dir: boolean };
 
@@ -27,6 +28,15 @@ function ExtTag({ name }: { name: string }) {
   );
 }
 
+const treeGitClass = (letter?: string) =>
+  letter == null
+    ? ""
+    : letter === "D"
+      ? "git-del"
+      : letter === "M" || letter === "R"
+        ? "git-mod"
+        : "git-add";
+
 const FolderIcon = ({ dim }: { dim?: boolean }) => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
     stroke={dim ? "var(--text-4)" : "var(--accent-dim)"} strokeWidth="1.7">
@@ -40,6 +50,16 @@ export function FilesPanel() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const childrenRef = useRef(children);
   childrenRef.current = children;
+  const git = useSyncExternalStore(subscribeGit, getGit);
+
+  // abs path -> status letter (worktree wins over index)
+  const gitByPath = new Map<string, string>();
+  if (root && git) {
+    for (const f of git.files) {
+      const letter = f.unstaged ?? f.staged;
+      if (letter) gitByPath.set(`${root}/${f.path}`, letter);
+    }
+  }
 
   const listInto = async (dir: string) => {
     try {
@@ -108,7 +128,12 @@ export function FilesPanel() {
           onClick={() => bus.openFile(e.path)}
         >
           <ExtTag name={e.name} />
-          <span>{e.name}</span>
+          <span className={treeGitClass(gitByPath.get(e.path))}>{e.name}</span>
+          {gitByPath.has(e.path) && (
+            <span className={`tree-git-letter ${treeGitClass(gitByPath.get(e.path))}`}>
+              {gitByPath.get(e.path) === "?" ? "U" : gitByPath.get(e.path)}
+            </span>
+          )}
         </div>
       ),
     );

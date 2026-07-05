@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { FilesPanel } from "./FilesPanel";
+import { GitPanel } from "./GitPanel";
 import { bus } from "../bus";
+import { getGit, subscribeGit } from "../gitStore";
 
 const FileIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -33,6 +35,8 @@ type ViewId = (typeof views)[number]["id"];
 
 export function Sidebar() {
   const [view, setView] = useState<ViewId>("files");
+  const git = useSyncExternalStore(subscribeGit, getGit);
+  const changeCount = git?.files.length ?? 0;
 
   return (
     <div className="sidebar">
@@ -54,6 +58,9 @@ export function Sidebar() {
             >
               {v.icon}
               <span>{v.label}</span>
+              {v.id === "git" && changeCount > 0 && (
+                <span className="switch-badge">{changeCount}</span>
+              )}
             </button>
           ))}
         </div>
@@ -65,7 +72,6 @@ export function Sidebar() {
         {view === "git" && <span>SOURCE CONTROL</span>}
       </div>
 
-      {/* git (#11) panel comes in a later slice */}
       {view === "files" ? (
         <FilesPanel />
       ) : view === "search" ? (
@@ -74,7 +80,7 @@ export function Sidebar() {
           <button onClick={() => bus.openSearch("content")}>⌘⇧F — content</button>
         </div>
       ) : (
-        <div className="sidebar-panel-empty">git panel comes soon</div>
+        <GitPanel />
       )}
     </div>
   );
