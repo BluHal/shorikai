@@ -13,6 +13,7 @@ import { ChatPane } from "./panes/ChatPane";
 import { EditorPane } from "./panes/EditorPane";
 import { DiffPane } from "./panes/DiffPane";
 import { DebugPane } from "./panes/DebugPane";
+import { PreviewPane, previewMode, IMAGE_EXT } from "./panes/PreviewPane";
 import { bus } from "./bus";
 import {
   getProjects,
@@ -30,10 +31,11 @@ const components = {
   editor: EditorPane,
   diff: DiffPane,
   debug: DebugPane,
+  preview: PreviewPane,
 };
 
 export const isEditorish = (id: string) =>
-  id.startsWith("editor:") || id.startsWith("diff:");
+  id.startsWith("editor:") || id.startsWith("diff:") || id.startsWith("preview:");
 const isTerminalId = (id: string) => id.startsWith("terminal-");
 // the bottom panel group: terminals plus the debug pane
 const isBottomId = (id: string) => isTerminalId(id) || id === "debug";
@@ -173,7 +175,11 @@ export function Workspace(props: { root: string; visible: boolean }) {
     if (editors.length === 0) return;
     const files: RailFile[] = editors.map((p) => ({
       id: p.id,
-      component: p.id.startsWith("diff:") ? "diff" : "editor",
+      component: p.id.startsWith("diff:")
+        ? "diff"
+        : p.id.startsWith("preview:")
+          ? "preview"
+          : "editor",
       title: p.title ?? p.id,
       params: (p.params ?? {}) as Record<string, unknown>,
       active: api.activePanel === p,
@@ -213,6 +219,29 @@ export function Workspace(props: { root: string; visible: boolean }) {
     const api = apiRef.current;
     if (!api) return;
     restoreEditors();
+    // non-code files open rendered; line-targeted opens go straight to source
+    if (previewMode(path) && (line == null || IMAGE_EXT.test(path))) {
+      const pid = `preview:${path}`;
+      const existing = api.getPanel(pid);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      const chat = api.getPanel("chat");
+      const anyEditor = api.panels.find((p) => isEditorish(p.id));
+      api.addPanel({
+        id: pid,
+        component: "preview",
+        title: path.split("/").pop() ?? path,
+        params: { path },
+        position: anyEditor
+          ? { referencePanel: anyEditor, direction: "within" }
+          : chat
+            ? { referencePanel: chat, direction: "right" }
+            : undefined,
+      });
+      return;
+    }
     const id = `editor:${path}`;
     const existing = api.getPanel(id);
     if (existing) {
