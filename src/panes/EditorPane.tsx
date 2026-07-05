@@ -1,9 +1,56 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { IDockviewPanelProps } from "dockview-react";
 import { ensureShorikaiTheme, monaco } from "../monacoSetup";
-import { ensureLsp } from "../lsp";
+import {
+  bannerFor,
+  ensureLsp,
+  installHint,
+  installServer,
+  langForPath,
+  subscribeLsp,
+} from "../lsp";
 import { useProjectRoot } from "../projects";
+
+function LspBanner({ root, path }: { root: string; path: string }) {
+  const banner = useSyncExternalStore(subscribeLsp, () =>
+    bannerFor(root, langForPath(path)),
+  );
+  if (!banner) return null;
+  return (
+    <div className="lsp-banner">
+      {banner.state === "installing" ? (
+        <>
+          <span className="tool-spinner" />
+          <span>
+            installing <b>{banner.cfg.command}</b>… this can take a minute
+          </span>
+        </>
+      ) : (
+        <>
+          <span>
+            <b>{banner.cfg.command}</b> language server not found
+            {banner.state === "failed" && " — install failed"}
+          </span>
+          {banner.cfg.install && (
+            <button
+              className="lsp-banner-install"
+              onClick={() => installServer(root, banner.server)}
+            >
+              Install via {banner.cfg.install.tool}
+            </button>
+          )}
+          <span className="lsp-banner-hint">
+            manual: <code>{installHint(banner.cfg)}</code>
+          </span>
+        </>
+      )}
+      {banner.state === "failed" && banner.error && (
+        <pre className="lsp-banner-error">{banner.error}</pre>
+      )}
+    </div>
+  );
+}
 
 // Saved-version bookkeeping survives pane unmounts (e.g. rail collapse):
 // models are kept alive so dirty edits and undo history come back.
@@ -103,6 +150,7 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
 
   return (
     <div className="editor-pane">
+      <LspBanner root={root} path={props.params.path} />
       {error ? <div className="editor-error">{error}</div> : null}
       <div ref={ref} className="editor-host" />
     </div>

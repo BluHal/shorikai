@@ -94,8 +94,12 @@ function App() {
 
   useEffect(() => {
     (async () => {
-      // reap PTYs/agents orphaned by a webview reload before spawning any
-      await Promise.allSettled([invoke("pty_reset"), invoke("acp_reset")]);
+      // reap PTYs/agents/LSP servers orphaned by a webview reload
+      await Promise.allSettled([
+        invoke("pty_reset"),
+        invoke("acp_reset"),
+        invoke("lsp_reset"),
+      ]);
       await initProjects();
       startGitStore();
     })();

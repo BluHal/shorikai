@@ -19,6 +19,92 @@ pub enum LspEvent {
     Exit { id: u32, code: Option<i32> },
 }
 
+/// Filetype -> server mapping lives in a user-editable config file,
+/// ~/.config/shorikai/lsp.json; created with sensible defaults.
+pub fn load_server_config() -> Result<Value, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let dir = std::path::Path::new(&home).join(".config/shorikai");
+    let path = dir.join("lsp.json");
+    if !path.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let default = serde_json::json!({
+            "servers": {
+                "typescript": {
+                    "command": "typescript-language-server",
+                    "args": ["--stdio"],
+                    "languages": ["typescript", "javascript"],
+                    "install": { "tool": "npm", "packages": ["typescript-language-server", "typescript"] }
+                },
+                "angular": {
+                    "command": "ngserver",
+                    "args": ["--stdio"],
+                    "languages": ["html"],
+                    "install": { "tool": "npm", "packages": ["@angular/language-server"] }
+                },
+                "go": {
+                    "command": "gopls",
+                    "args": [],
+                    "languages": ["go"],
+                    "install": { "tool": "go", "packages": ["golang.org/x/tools/gopls@latest"] }
+                }
+            }
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&default).unwrap())
+            .map_err(|e| e.to_string())?;
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| format!("invalid {}: {e}", path.display()))
+}
+
+pub fn which(command: &str) -> bool {
+    if command.contains('/') {
+        return std::path::Path::new(command).is_file();
+    }
+    let Ok(path) = std::env::var("PATH") else {
+        return false;
+    };
+    path.split(':').any(|dir| {
+        let candidate = std::path::Path::new(dir).join(command);
+        candidate.is_file()
+            && std::fs::metadata(&candidate)
+                .map(|m| std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111 != 0)
+                .unwrap_or(false)
+    })
+}
+
+/// One-click install: shells out to the package manager the config names.
+pub fn install(tool: &str, packages: &[String]) -> Result<String, String> {
+    let (cmd, args): (&str, Vec<&str>) = match tool {
+        "npm" => ("npm", ["install", "-g"].into_iter().chain(packages.iter().map(String::as_str)).collect()),
+        "go" => ("go", ["install"].into_iter().chain(packages.iter().map(String::as_str)).collect()),
+        "brew" => ("brew", ["install"].into_iter().chain(packages.iter().map(String::as_str)).collect()),
+        other => return Err(format!("unknown install tool {other:?}")),
+    };
+    let out = Command::new(cmd)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("failed to run {cmd}: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if out.status.success() {
+        Ok(tail(&stdout, 600))
+    } else {
+        Err(tail(&format!("{stderr}\n{stdout}"), 1200))
+    }
+}
+
+fn tail(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.len() <= max {
+        return t.to_owned();
+    }
+    let mut cut = t.len() - max;
+    while !t.is_char_boundary(cut) {
+        cut += 1;
+    }
+    format!("…{}", &t[cut..])
+}
+
 struct Server {
     child: Child,
     stdin: ChildStdin,

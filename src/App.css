@@ -743,6 +743,62 @@
   color: var(--warning);
 }
 
+/* ============ lsp install banner ============ */
+.lsp-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.lsp-banner b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.lsp-banner-install {
+  background: none;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-xs);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.lsp-banner-install:hover {
+  background: var(--accent-wash);
+}
+
+.lsp-banner-hint {
+  color: var(--text-4);
+}
+
+.lsp-banner-hint code {
+  color: var(--text-3);
+  background: var(--surface-1);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+}
+
+.lsp-banner-error {
+  width: 100%;
+  margin: 0;
+  max-height: 120px;
+  overflow: auto;
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--error);
+  white-space: pre-wrap;
+}
+
 /* ============ status bar ============ */
 .statusbar {
   height: 24px;

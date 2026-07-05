@@ -188,6 +188,23 @@ fn lsp_reset(host: State<LspHost>) {
 }
 
 #[tauri::command]
+fn lsp_servers() -> Result<Value, String> {
+    lsp_host::load_server_config()
+}
+
+#[tauri::command]
+fn which_cmd(command: String) -> bool {
+    lsp_host::which(&command)
+}
+
+#[tauri::command]
+async fn lsp_install(tool: String, packages: Vec<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || lsp_host::install(&tool, &packages))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn git_status_cmd(root: String) -> Result<git_status::GitStatus, String> {
     git_status::status(&root)
 }
@@ -270,6 +287,9 @@ pub fn run() {
             lsp_send,
             lsp_kill,
             lsp_reset,
+            lsp_servers,
+            which_cmd,
+            lsp_install,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
