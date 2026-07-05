@@ -50,35 +50,56 @@ pub struct AgentConfig {
     pub args: Vec<String>,
 }
 
+fn default_agents() -> Value {
+    json!({
+        "claude-code": {
+            "command": "npx",
+            "args": ["--yes", "@zed-industries/claude-code-acp"]
+        },
+        "codex": {
+            "command": "npx",
+            "args": ["--yes", "@zed-industries/codex-acp"],
+            "fallback": "codex"
+        }
+    })
+}
+
 /// Agent definitions live in a plain config file so the client stays
-/// agent-agnostic: ~/.config/shorikai/agents.json
-pub fn load_agent_config(name: &str) -> Result<AgentConfig, String> {
+/// agent-agnostic: ~/.config/shorikai/agents.json. Missing default entries
+/// are merged in additively; user edits win.
+pub fn load_agents() -> Result<Value, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
     let dir = std::path::Path::new(&home).join(".config/shorikai");
     let path = dir.join("agents.json");
-    if !path.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "agents": {
-                    "claude-code": {
-                        "command": "npx",
-                        "args": ["--yes", "@zed-industries/claude-code-acp"]
-                    }
-                }
-            }))
-            .unwrap(),
-        )
-        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut root: Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| json!({ "agents": {} }));
+    let mut changed = !path.exists();
+    if !root.get("agents").map(Value::is_object).unwrap_or(false) {
+        root["agents"] = json!({});
+        changed = true;
     }
-    let raw = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let root: Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("invalid {}: {e}", path.display()))?;
-    let entry = root
-        .get("agents")
-        .and_then(|a| a.get(name))
-        .ok_or_else(|| format!("agent {name:?} not found in {}", path.display()))?;
+    let agents = root["agents"].as_object_mut().unwrap();
+    for (name, cfg) in default_agents().as_object().unwrap() {
+        if !agents.contains_key(name) {
+            agents.insert(name.clone(), cfg.clone());
+            changed = true;
+        }
+    }
+    if changed {
+        std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap())
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(root["agents"].clone())
+}
+
+pub fn load_agent_config(name: &str) -> Result<AgentConfig, String> {
+    let agents = load_agents()?;
+    let entry = agents
+        .get(name)
+        .ok_or_else(|| format!("agent {name:?} not found in agents.json"))?;
     serde_json::from_value(entry.clone()).map_err(|e| e.to_string())
 }
 

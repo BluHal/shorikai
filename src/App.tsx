@@ -34,6 +34,8 @@ bus.collapseEditor = () => activeWorkspace()?.collapseEditor();
 bus.toggleTerminal = () => activeWorkspace()?.toggleTerminal();
 bus.startDebugTerminal = () => startDebugTerminal();
 bus.startGoDebug = () => startGoDebug();
+bus.openCliTerminal = (cmd, title) =>
+  activeWorkspace()?.openCliTerminal(cmd, title);
 
 function DebugOverlay() {
   const { paused, error, starting } = useSyncExternalStore(subscribeDebug, getDebug);

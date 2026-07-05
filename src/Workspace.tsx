@@ -286,6 +286,29 @@ export function Workspace(props: { root: string; visible: boolean }) {
     }
   };
 
+  const openCliTerminal = (cmd: string, title: string) => {
+    const api = apiRef.current;
+    if (!api) return;
+    const termGroup = api.groups.find(
+      (g) => g.panels.length > 0 && g.panels.every((p) => isBottomId(p.id)),
+    );
+    const chat = api.getPanel("chat");
+    api.addPanel({
+      id: `terminal-${++termSeq}`,
+      component: "terminal",
+      title,
+      params: { cmd },
+      position: termGroup
+        ? { referenceGroup: termGroup, direction: "within" }
+        : chat
+          ? { referencePanel: chat, direction: "below" }
+          : undefined,
+    });
+    if (termGroup && termGroup.height <= 40) {
+      termGroup.api.setSize({ height: termHeights.current.get(termGroup.id) ?? 240 });
+    }
+  };
+
   const openDebugPane = () => {
     const api = apiRef.current;
     if (!api) return;
@@ -324,6 +347,7 @@ export function Workspace(props: { root: string; visible: boolean }) {
       toggleTerminal,
       addDebugTerminal,
       openDebugPane,
+      openCliTerminal,
     });
 
     let restored = false;

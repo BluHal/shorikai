@@ -65,6 +65,11 @@ fn project_root() -> String {
 }
 
 #[tauri::command]
+fn acp_agents() -> Result<Value, String> {
+    acp_bridge::load_agents()
+}
+
+#[tauri::command]
 fn acp_start(bridge: State<AcpBridge>, agent: String, cwd: String) -> Result<u32, String> {
     eprintln!("[acp] start requested: agent={agent} cwd={cwd}");
     let config = acp_bridge::load_agent_config(&agent)?;
@@ -409,6 +414,7 @@ pub fn run() {
             pty_kill,
             pty_reset,
             project_root,
+            acp_agents,
             acp_start,
             acp_prompt,
             acp_permission_response,

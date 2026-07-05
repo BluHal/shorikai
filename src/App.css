@@ -1226,6 +1226,27 @@
 .chat-name {
   font-size: var(--fs-lg);
   color: var(--text-1);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.chat-agent-picker {
+  appearance: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  padding: 1px 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.chat-agent-picker:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
 }
 
 .chat-status {

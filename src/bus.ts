@@ -8,4 +8,5 @@ export const bus = {
   openSearch: (_mode: "files" | "content") => {},
   startDebugTerminal: () => {},
   startGoDebug: () => {},
+  openCliTerminal: (_cmd: string, _title: string) => {},
 };

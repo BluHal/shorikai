@@ -9,6 +9,8 @@ import { useProjectRoot } from "../projects";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalParams = {
+  /// run this command instead of the login shell (e.g. a CLI agent fallback)
+  cmd?: string;
   /// extra env vars (debug terminals inject the js-debug bootloader here)
   env?: Record<string, string>;
   /// reverse-request handle to answer once the shell is up
@@ -74,6 +76,7 @@ export function TerminalPane(props: IDockviewPanelProps<TerminalParams>) {
     });
 
     invoke<[number, number | null]>("pty_spawn", {
+      cmd: props.params?.cmd,
       cols: term.cols,
       rows: term.rows,
       cwd: root,

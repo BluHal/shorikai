@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { ToolCard, ToolContentItem, ToolRow } from "./ToolCard";
 import { mdComponentsFor } from "./mdComponents";
 import { setAgentStatus, useProjectRoot } from "../projects";
+import { bus } from "../bus";
 import {
   AgentStrip,
   DrillBody,
@@ -103,9 +104,15 @@ type AcpEvent = {
 
 type Status = "starting" | "ready" | "busy" | "dead";
 
-const AGENT = "claude-code";
+type AgentConfig = { command: string; args?: string[]; fallback?: string };
 
-export function ChatPane() {
+const displayName = (key: string) =>
+  key
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+
+export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const root = useProjectRoot();
   const mdComponents = mdComponentsFor(root);
   const [rows, setRows] = useState<Row[]>([]);
@@ -113,18 +120,22 @@ export function ChatPane() {
   const [input, setInput] = useState("");
   const [subs, setSubs] = useState<SubAgent[]>([]);
   const [drill, setDrill] = useState<string | null>(null);
+  const [agent, setAgent] = useState("claude-code");
+  const [agents, setAgents] = useState<Record<string, AgentConfig>>({});
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
   const agentIdRef = useRef<number | null>(null);
   const subsRef = useRef<SubAgent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const start = async () => {
+  const start = async (name = agentRef.current) => {
     setStatus("starting");
     subsRef.current = [];
     setSubs([]);
     setDrill(null);
     try {
       agentIdRef.current = await invoke<number>("acp_start", {
-        agent: AGENT,
+        agent: name,
         cwd: root,
       });
     } catch (err) {
@@ -134,6 +145,17 @@ export function ChatPane() {
         { kind: "system", text: `failed to start agent: ${err}`, restart: true },
       ]);
     }
+  };
+
+  const switchAgent = (name: string) => {
+    if (name === agent) return;
+    const oldId = agentIdRef.current;
+    if (oldId != null) invoke("acp_kill", { id: oldId }).catch(() => {});
+    agentIdRef.current = null;
+    setAgent(name);
+    props.api?.setTitle(displayName(name));
+    setRows([{ kind: "system", text: `switched to ${displayName(name)}` }]);
+    start(name);
   };
 
   useEffect(() => {
@@ -224,6 +246,9 @@ export function ChatPane() {
           break;
       }
     });
+    invoke<Record<string, AgentConfig>>("acp_agents")
+      .then(setAgents)
+      .catch(() => {});
     start();
     return () => {
       unlisten.then((u) => u());
@@ -278,7 +303,23 @@ export function ChatPane() {
       <div className="chat-header">
         <span className="chat-avatar">&gt;_</span>
         <div className="chat-title">
-          <span className="chat-name">Claude Code</span>
+          <span className="chat-name">
+            {displayName(agent)}
+            {Object.keys(agents).length > 1 && (
+              <select
+                className="chat-agent-picker"
+                value={agent}
+                title="Switch agent"
+                onChange={(e) => switchAgent(e.target.value)}
+              >
+                {Object.keys(agents).map((name) => (
+                  <option key={name} value={name}>
+                    {displayName(name)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </span>
           <span className="chat-status">
             <span className={`chat-dot chat-dot-${status}`} />
             {statusText[status]}
@@ -323,8 +364,18 @@ export function ChatPane() {
                   <div key={i} className="chat-system">
                     <span>{row.text}</span>
                     {row.restart && (
-                      <button className="chat-restart" onClick={start}>
+                      <button className="chat-restart" onClick={() => start()}>
                         restart
+                      </button>
+                    )}
+                    {row.restart && agents[agent]?.fallback && (
+                      <button
+                        className="chat-restart"
+                        onClick={() =>
+                          bus.openCliTerminal(agents[agent].fallback!, agent)
+                        }
+                      >
+                        open {agent} in a terminal
                       </button>
                     )}
                   </div>
