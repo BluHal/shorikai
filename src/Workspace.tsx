@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   DockviewApi,
   DockviewReact,
@@ -14,12 +15,14 @@ import { DiffPane } from "./panes/DiffPane";
 import { DebugPane } from "./panes/DebugPane";
 import { bus } from "./bus";
 import {
+  getProjects,
   ProjectCtx,
   registerWorkspace,
   saveSession,
   takeSavedLayout,
   unregisterWorkspace,
 } from "./projects";
+import { getDebug, markGoRoot, subscribeDebug } from "./debug";
 
 const components = {
   terminal: TerminalPane,
@@ -45,22 +48,39 @@ function DockChip(props: IDockviewHeaderActionsProps) {
     );
   }
   if (props.panels.length > 0 && props.panels.every((p) => isBottomId(p.id))) {
-    return (
-      <div className="dock-chip-row">
-        <div
-          className="dock-chip dock-chip-debug"
-          onClick={() => bus.startDebugTerminal()}
-          title="New debug terminal — any node process auto-attaches"
-        >
-          ⚡ debug
-        </div>
-        <div className="dock-chip" onClick={() => bus.toggleTerminal()} title="Toggle terminal panel  ⌘J">
-          ⌄
-        </div>
-      </div>
-    );
+    return <TerminalChips />;
   }
   return null;
+}
+
+function TerminalChips() {
+  const isGo = useSyncExternalStore(subscribeDebug, () => {
+    const active = getProjects().active;
+    return active != null && getDebug().goRoots.has(active);
+  });
+  return (
+    <div className="dock-chip-row">
+      {isGo && (
+        <div
+          className="dock-chip dock-chip-debug"
+          onClick={() => bus.startGoDebug()}
+          title="Debug the Go target under delve (.shorikai/debug.json)"
+        >
+          ⚡ go
+        </div>
+      )}
+      <div
+        className="dock-chip dock-chip-debug"
+        onClick={() => bus.startDebugTerminal()}
+        title="New debug terminal — any node process auto-attaches"
+      >
+        ⚡ debug
+      </div>
+      <div className="dock-chip" onClick={() => bus.toggleTerminal()} title="Toggle terminal panel  ⌘J">
+        ⌄
+      </div>
+    </div>
+  );
 }
 
 type RailFile = {
@@ -341,7 +361,13 @@ export function Workspace(props: { root: string; visible: boolean }) {
     event.api.onDidLayoutChange(() => saveSession());
   };
 
-  useEffect(() => () => unregisterWorkspace(root), [root]);
+  useEffect(() => {
+    invoke("fs_read", { path: `${root}/go.mod` }).then(
+      () => markGoRoot(root),
+      () => {},
+    );
+    return () => unregisterWorkspace(root);
+  }, [root]);
 
   return (
     <ProjectCtx.Provider value={root}>

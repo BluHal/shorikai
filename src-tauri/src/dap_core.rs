@@ -96,6 +96,8 @@ pub struct DapCore {
     next_session: Arc<AtomicU32>,
     breakpoints: Arc<Mutex<HashMap<String, Vec<u32>>>>,
     on_event: Arc<dyn Fn(DapEvent) + Send + Sync>,
+    /// pgids of per-session adapters (dlv); each has a reaper thread
+    adapter_pids: Mutex<Vec<i32>>,
 }
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -108,7 +110,74 @@ impl DapCore {
             next_session: Arc::new(AtomicU32::new(1)),
             breakpoints: Arc::new(Mutex::new(HashMap::new())),
             on_event: Arc::new(on_event),
+            adapter_pids: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Launch a Go target under delve (dlv dap) and reuse the whole debug UI.
+    /// Launch-based: Go has no NODE_OPTIONS-style attach trick.
+    pub fn start_go_debug(
+        &self,
+        root: &str,
+        program: &str,
+        args: Vec<String>,
+    ) -> Result<u32, String> {
+        if !crate::lsp_host::which("dlv") {
+            return Err(
+                "delve (dlv) not found on PATH — go install github.com/go-delve/delve/cmd/dlv@latest"
+                    .into(),
+            );
+        }
+        let port = free_port()?;
+        let mut child = Command::new("dlv")
+            .args(["dap", "--listen", &format!("127.0.0.1:{port}")])
+            .current_dir(root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map_err(|e| format!("failed to start dlv: {e}"))?;
+        let pid = child.id() as i32;
+
+        // dlv dap serves exactly one client, so no readiness probe — a probe
+        // connection would consume the slot. Retry the real session instead.
+        let launch = json!({
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": program,
+            "args": args,
+            "cwd": root,
+            // debuggee stdout/stderr arrive as DAP output events
+            "outputMode": "remote",
+        });
+        let mut last_err = String::new();
+        for _ in 0..100 {
+            if child.try_wait().map(|s| s.is_some()).unwrap_or(false) {
+                return Err("dlv exited immediately".into());
+            }
+            match self.start_session(port, "launch", launch.clone()) {
+                Ok(sid) => {
+                    self.adapter_pids.lock().unwrap().push(pid);
+                    // reaper: collects dlv when it exits (naturally or stop_all)
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                    return Ok(sid);
+                }
+                Err(e) if e.contains("refused") => {
+                    last_err = e;
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => {
+                    let _ = child.kill();
+                    return Err(e);
+                }
+            }
+        }
+        let _ = child.kill();
+        Err(format!("dlv dap did not start listening: {last_err}"))
     }
 
     /// Start (or reuse) the js-debug DAP server and open a debug-terminal
@@ -320,6 +389,11 @@ impl DapCore {
             let _ = child.kill();
             let _ = child.wait();
         }
+        for pid in self.adapter_pids.lock().unwrap().drain(..) {
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
         self.sessions.lock().unwrap().clear();
     }
 
@@ -509,6 +583,11 @@ fn handle_event(ctx: &ReaderCtx, msg: &Value) {
         Some("continued") => (ctx.on_event)(DapEvent::Continued {
             session_id: ctx.session_id,
         }),
+        Some("terminated") => {
+            // the debuggee is done; disconnect so the adapter closes the
+            // socket (dlv in particular waits for this before exiting)
+            ctx.session.request_forget("disconnect", json!({}));
+        }
         Some("output") => (ctx.on_event)(DapEvent::Output {
             session_id: ctx.session_id,
             category: body
@@ -766,6 +845,78 @@ mod tests {
         }
         wait_stop(&rx);
         let _ = adapter.kill();
+    }
+
+    #[test]
+    fn go_debug_end_to_end_with_delve() {
+        if !crate::lsp_host::which("dlv") || !crate::lsp_host::which("go") {
+            eprintln!("skipping: dlv/go not on PATH");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("shorikai-godbg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // /var/folders is a symlink; go records canonical /private/var paths
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        std::fs::write(dir.join("go.mod"), "module fake\n\ngo 1.21\n").unwrap();
+        std::fs::write(
+            dir.join("main.go"),
+            "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tx := 41\n\tx = x + 1\n\tfmt.Println(\"x =\", x)\n}\n",
+        )
+        .unwrap();
+        let root = dir.to_str().unwrap();
+        let main_go = dir.join("main.go").to_string_lossy().into_owned();
+
+        let (tx, rx) = mpsc::channel();
+        let core = DapCore::new(move |e| {
+            tx.send(e).ok();
+        });
+        core.set_breakpoints(&main_go, vec![7]); // x = x + 1
+        let sid = core.start_go_debug(root, ".", vec![]).unwrap();
+
+        // dlv compiles the target first; be generous
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let thread = loop {
+            match rx.recv_timeout(deadline - Instant::now()).expect("no stop") {
+                DapEvent::Stopped { thread_id, path, line, .. } => {
+                    assert!(path.as_deref().unwrap_or("").ends_with("main.go"), "{path:?}");
+                    assert_eq!(line, Some(7));
+                    break thread_id;
+                }
+                DapEvent::Error { message } => panic!("error: {message}"),
+                _ => {}
+            }
+        };
+
+        // unchanged instruments work on Go
+        let frames = core.stack_trace(sid, thread).unwrap();
+        assert!(frames[0]["path"].as_str().unwrap().ends_with("main.go"));
+        let scopes = core.scopes(sid, frames[0]["id"].as_i64().unwrap()).unwrap();
+        let vars = core
+            .variables(sid, scopes[0]["variablesReference"].as_i64().unwrap())
+            .unwrap();
+        let x = vars
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == "x")
+            .expect("local x");
+        assert_eq!(x["value"], "41");
+
+        core.continue_(sid, thread).unwrap();
+        // program stdout arrives as output events, session ends when dlv exits
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut saw_output = false;
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()).expect("no end") {
+                DapEvent::Output { text, .. } if text.contains("x = 42") => saw_output = true,
+                DapEvent::SessionEnded { .. } => break,
+                _ => {}
+            }
+        }
+        assert!(saw_output, "program stdout should stream through as output events");
+        core.stop_all();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

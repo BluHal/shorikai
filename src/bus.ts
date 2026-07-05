@@ -7,4 +7,5 @@ export const bus = {
   toggleTerminal: () => {},
   openSearch: (_mode: "files" | "content") => {},
   startDebugTerminal: () => {},
+  startGoDebug: () => {},
 };

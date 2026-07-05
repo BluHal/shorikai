@@ -230,6 +230,44 @@ fn dap_reset(core: State<std::sync::Arc<DapCore>>) {
     core.stop_all();
 }
 
+/// Go launch target: <root>/.shorikai/debug.json {"go": {"program": ".", "args": []}}
+fn go_launch_config(root: &str) -> (String, Vec<String>) {
+    let path = std::path::Path::new(root).join(".shorikai/debug.json");
+    let cfg: Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or(Value::Null);
+    let program = cfg
+        .pointer("/go/program")
+        .and_then(|p| p.as_str())
+        .unwrap_or(".")
+        .to_owned();
+    let args = cfg
+        .pointer("/go/args")
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    (program, args)
+}
+
+#[tauri::command]
+async fn dap_start_go(
+    core: State<'_, std::sync::Arc<DapCore>>,
+    root: String,
+) -> Result<u32, String> {
+    let core = std::sync::Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (program, args) = go_launch_config(&root);
+        core.start_go_debug(&root, &program, args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn dap_step(
     core: State<std::sync::Arc<DapCore>>,
@@ -404,6 +442,7 @@ pub fn run() {
             dap_continue,
             dap_reset,
             dap_step,
+            dap_start_go,
             dap_stack_trace,
             dap_scopes,
             dap_variables,

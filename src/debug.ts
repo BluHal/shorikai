@@ -35,6 +35,8 @@ type Snapshot = {
   consoleLines: ConsoleLine[];
   /// bumps on every stop so panels refetch scopes/variables
   stopNonce: number;
+  /// project roots with a go.mod — they get the "⚡ go" launch chip
+  goRoots: Set<string>;
 };
 
 const breakpoints = new Map<string, Set<number>>();
@@ -46,6 +48,7 @@ let snapshot: Snapshot = {
   selectedFrame: null,
   consoleLines: [],
   stopNonce: 0,
+  goRoots: new Set(),
 };
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((fn) => fn());
@@ -211,6 +214,26 @@ export async function startDebugTerminal() {
   try {
     await invoke("dap_start_debug_terminal", { root });
     // terminal pane arrives via the run_in_terminal event
+  } catch (err) {
+    patch({ starting: false, error: String(err) });
+  }
+}
+
+/// mark a workspace as a Go project (has go.mod)
+export function markGoRoot(root: string) {
+  if (snapshot.goRoots.has(root)) return;
+  patch({ goRoots: new Set(snapshot.goRoots).add(root) });
+}
+
+/// launch the configured Go target (<root>/.shorikai/debug.json) under delve
+export async function startGoDebug() {
+  const root = getProjects().active;
+  if (!root || snapshot.starting) return;
+  patch({ starting: true, error: null });
+  try {
+    await invoke("dap_start_go", { root });
+    patch({ starting: false });
+    activeWorkspace()?.openDebugPane();
   } catch (err) {
     patch({ starting: false, error: String(err) });
   }

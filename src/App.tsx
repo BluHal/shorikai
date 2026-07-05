@@ -13,6 +13,7 @@ import {
   getDebug,
   pauseRunning,
   startDebugTerminal,
+  startGoDebug,
   step,
   subscribeDebug,
   wireDebug,
@@ -32,6 +33,7 @@ bus.openDiff = (path, o, n) => activeWorkspace()?.openDiff(path, o, n);
 bus.collapseEditor = () => activeWorkspace()?.collapseEditor();
 bus.toggleTerminal = () => activeWorkspace()?.toggleTerminal();
 bus.startDebugTerminal = () => startDebugTerminal();
+bus.startGoDebug = () => startGoDebug();
 
 function DebugOverlay() {
   const { paused, error, starting } = useSyncExternalStore(subscribeDebug, getDebug);
