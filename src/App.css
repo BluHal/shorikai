@@ -1224,6 +1224,53 @@
   border-left: 1px solid var(--border);
 }
 
+.statusbar-git {
+  border-left: 1px solid var(--border);
+}
+
+.statusbar-dot-sep {
+  color: var(--text-4);
+}
+
+.statusbar-agent-idle,
+.statusbar-agent-working,
+.statusbar-agent-attention {
+  border-left: 1px solid var(--border);
+}
+
+.statusbar-agent-idle .statusbar-agent-dot {
+  color: var(--text-4);
+}
+
+.statusbar-agent-working {
+  color: var(--accent);
+}
+
+.statusbar-agent-working .statusbar-agent-dot {
+  color: var(--accent);
+  animation: ckpt-pulse 1s ease-in-out infinite;
+}
+
+.statusbar-agent-attention {
+  color: var(--warning);
+}
+
+.statusbar-agent-attention .statusbar-agent-dot {
+  color: var(--warning);
+}
+
+.statusbar-port {
+  color: var(--success);
+}
+
+.statusbar-port-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success-dot);
+  box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.15);
+}
+
 .statusbar-right {
   margin-left: auto;
   display: flex;

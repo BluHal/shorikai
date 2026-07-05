@@ -18,7 +18,22 @@ pub struct GitFile {
 #[derive(Clone, Debug, Serialize)]
 pub struct GitStatus {
     pub branch: String,
+    pub ahead: u32,
+    pub behind: u32,
     pub files: Vec<GitFile>,
+}
+
+fn header_count(header: &str, key: &str) -> u32 {
+    header
+        .split_once(key)
+        .and_then(|(_, rest)| {
+            rest.trim_start()
+                .split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0)
 }
 
 fn git(root: &str, args: &[&str]) -> Result<String, String> {
@@ -39,6 +54,8 @@ fn git(root: &str, args: &[&str]) -> Result<String, String> {
 pub fn status(root: &str) -> Result<GitStatus, String> {
     let out = git(root, &["status", "--porcelain", "-z", "--branch"])?;
     let mut branch = String::new();
+    let mut ahead = 0;
+    let mut behind = 0;
     let mut files = Vec::new();
     let mut it = out.split('\0');
     while let Some(chunk) = it.next() {
@@ -46,6 +63,8 @@ pub fn status(root: &str) -> Result<GitStatus, String> {
             continue;
         }
         if let Some(head) = chunk.strip_prefix("## ") {
+            ahead = header_count(head, "ahead ");
+            behind = header_count(head, "behind ");
             let head = head.split("...").next().unwrap_or(head);
             branch = head
                 .strip_prefix("No commits yet on ")
@@ -72,7 +91,12 @@ pub fn status(root: &str) -> Result<GitStatus, String> {
             orig_path,
         });
     }
-    Ok(GitStatus { branch, files })
+    Ok(GitStatus {
+        branch,
+        ahead,
+        behind,
+        files,
+    })
 }
 
 pub fn stage(root: &str, path: &str) -> Result<(), String> {

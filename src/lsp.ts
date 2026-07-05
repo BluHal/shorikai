@@ -59,6 +59,15 @@ export type Banner = {
 const banners = new Map<string, Banner>(); // key: root::server
 const pendingModels = new Map<string, Set<monaco.editor.ITextModel>>();
 
+/// number of running language servers for a workspace
+export function getLspRunning(root: string): number {
+  let n = 0;
+  for (const [key, s] of states) {
+    if (key.startsWith(root + "::") && s === "running") n += 1;
+  }
+  return n;
+}
+
 /// worst state across the workspace's servers, for the status bar
 export function getLspState(root: string): LspState | undefined {
   let best: LspState | undefined;

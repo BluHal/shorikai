@@ -12,6 +12,11 @@ import {
 } from "../lsp";
 import { useProjectRoot } from "../projects";
 import { getBreakpoints, getDebug, subscribeDebug, toggleBreakpoint } from "../debug";
+import { setCursor } from "../vitals";
+
+const langDisplay = (id: string) =>
+  ({ typescript: "TypeScript", javascript: "JavaScript", json: "JSON", css: "CSS", html: "HTML", go: "Go", rust: "Rust", markdown: "Markdown", python: "Python", shell: "Shell", yaml: "YAML" })[id] ??
+  id.charAt(0).toUpperCase() + id.slice(1);
 
 function LspBanner({ root, path }: { root: string; path: string }) {
   const banner = useSyncExternalStore(subscribeLsp, () =>
@@ -165,6 +170,22 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
             setError(`save failed: ${err}`);
           }
         });
+
+        // cursor line:col of the focused editor feeds the status bar
+        const reportCursor = () => {
+          const pos = editor.getPosition();
+          if (pos) {
+            setCursor({
+              line: pos.lineNumber,
+              col: pos.column,
+              lang: langDisplay(model!.getLanguageId()),
+            });
+          }
+        };
+        editor.onDidChangeCursorPosition(() => {
+          if (editor.hasTextFocus()) reportCursor();
+        });
+        editor.onDidFocusEditorText(reportCursor);
 
         observer = new ResizeObserver(() => editor.layout());
         observer.observe(ref.current!);

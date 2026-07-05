@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { IDockviewPanelProps } from "dockview-react";
 import { useProjectRoot } from "../projects";
+import { clearPortForPty, sniffPort } from "../vitals";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalParams = {
@@ -68,11 +69,18 @@ export function TerminalPane(props: IDockviewPanelProps<TerminalParams>) {
     let ptyId: number | null = null;
     let disposed = false;
 
+    let portCarry = "";
     const unData = listen<{ id: number; data: string }>("pty:data", (e) => {
-      if (e.payload.id === ptyId) term.write(e.payload.data);
+      if (e.payload.id === ptyId) {
+        term.write(e.payload.data);
+        portCarry = sniffPort(root, ptyId!, e.payload.data, portCarry);
+      }
     });
     const unExit = listen<{ id: number }>("pty:exit", (e) => {
-      if (e.payload.id === ptyId) props.api.close();
+      if (e.payload.id === ptyId) {
+        clearPortForPty(e.payload.id);
+        props.api.close();
+      }
     });
 
     invoke<[number, number | null]>("pty_spawn", {
@@ -122,7 +130,10 @@ export function TerminalPane(props: IDockviewPanelProps<TerminalParams>) {
       activeSub.dispose();
       unData.then((u) => u());
       unExit.then((u) => u());
-      if (ptyId != null) invoke("pty_kill", { id: ptyId }).catch(() => {});
+      if (ptyId != null) {
+        clearPortForPty(ptyId);
+        invoke("pty_kill", { id: ptyId }).catch(() => {});
+      }
       term.dispose();
     };
   }, []);

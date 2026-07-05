@@ -12,7 +12,12 @@ export type GitFile = {
   orig_path: string | null;
 };
 
-export type GitStatus = { branch: string; files: GitFile[] };
+export type GitStatus = {
+  branch: string;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
+};
 
 const states = new Map<string, GitStatus | null>();
 const roots = new Set<string>();
