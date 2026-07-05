@@ -385,6 +385,277 @@
   animation: ckpt-spin 0.8s linear infinite;
 }
 
+/* ============ sub-agents: strip, team card, drill ============ */
+.agent-strip,
+.drill-crumb {
+  flex: none;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.agent-strip-label {
+  font-size: var(--fs-2xs);
+  letter-spacing: 1.5px;
+  color: var(--text-4);
+  flex: none;
+}
+
+.agent-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  min-width: 0;
+  max-width: 280px;
+}
+
+.agent-chip-name {
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  flex: none;
+}
+
+.agent-chip-activity {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-strip-counts {
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  color: var(--text-4);
+  flex: none;
+}
+
+.sub-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: ckpt-spin 0.8s linear infinite;
+  display: inline-block;
+  flex: none;
+}
+
+.sub-status-done {
+  color: var(--success);
+  font-size: 12px;
+  flex: none;
+}
+
+.sub-status-failed {
+  color: var(--warning);
+  font-weight: 700;
+  flex: none;
+}
+
+.team-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+.team-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+
+.team-card-hint {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-4);
+}
+
+.team-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+.team-member {
+  background: var(--surface-1);
+  padding: 13px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.team-member-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-initials {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--surface-4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  flex: none;
+  color: var(--accent);
+}
+
+.team-initials-done {
+  color: var(--success);
+}
+
+.team-initials-failed {
+  color: var(--warning);
+}
+
+.team-member-name {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+
+.team-member-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.team-member-task {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.drill-crumb {
+  font-size: var(--fs-sm);
+  gap: 8px;
+}
+
+.drill-back {
+  color: var(--accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drill-sep {
+  color: var(--text-4);
+}
+
+.drill-name {
+  color: var(--text-1);
+}
+
+.drill-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-xs);
+  color: var(--accent);
+}
+
+.drill-status-done {
+  color: var(--success);
+}
+
+.drill-status-failed {
+  color: var(--warning);
+}
+
+.drill-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.drill-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.drill-initials {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  font-size: var(--fs-xs);
+}
+
+.drill-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drill-head-name {
+  font-size: var(--fs-md);
+  color: var(--text-1);
+}
+
+.drill-head-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.drill-task {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  padding: 12px 14px;
+  font-size: var(--fs-sm);
+}
+
+.drill-task-label {
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.5px;
+}
+
+.drill-task-text {
+  color: var(--text-1);
+  margin-top: 5px;
+  line-height: 1.55;
+}
+
+.drill-transcript {
+  font-size: var(--fs-md);
+  color: var(--text-2);
+}
+
+.drill-shallow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: var(--fs-md);
+  color: var(--text-3);
+}
+
 /* ============ tool-call cards ============ */
 .tool-card {
   background: var(--surface-2);

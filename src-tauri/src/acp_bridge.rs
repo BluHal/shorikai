@@ -21,10 +21,26 @@ pub enum AcpEvent {
     /// tool_call and tool_call_update, passed through raw for the card UI (#6)
     ToolCall { agent_id: u32, update: Value },
     Plan { agent_id: u32, update: Value },
+    /// Task tool calls normalized into sub-agent state; full state per event
+    /// so the frontend just replaces by id
+    SubAgentUpdate { agent_id: u32, sub: SubAgentState },
     PermissionRequest { agent_id: u32, request_id: Value, request: Value },
     TurnEnded { agent_id: u32, stop_reason: String },
     AgentExit { agent_id: u32, code: Option<i32> },
     Error { agent_id: u32, message: String },
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SubAgentState {
+    pub id: String,
+    pub name: String,
+    pub task: String,
+    /// working | done | failed
+    pub status: String,
+    /// last text line the sub-agent produced
+    pub activity: String,
+    /// accumulated text chunks; may stay empty for shallow streams
+    pub transcript: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -72,6 +88,7 @@ struct AgentProc {
     next_rpc_id: u64,
     pending: HashMap<u64, mpsc::Sender<Result<Value, String>>>,
     session_id: Option<String>,
+    subagents: HashMap<String, SubAgentState>,
 }
 
 type Agents = Arc<Mutex<HashMap<u32, AgentProc>>>;
@@ -118,6 +135,7 @@ impl AcpBridge {
                 next_rpc_id: 0,
                 pending: HashMap::new(),
                 session_id: None,
+                subagents: HashMap::new(),
             },
         );
 
@@ -388,7 +406,10 @@ fn handle_message(
                     text: chunk_text(&update),
                 }),
                 Some("tool_call") | Some("tool_call_update") => {
-                    on_event(AcpEvent::ToolCall { agent_id, update })
+                    match track_subagent(agent_id, &update, agents) {
+                        Some(sub) => on_event(AcpEvent::SubAgentUpdate { agent_id, sub }),
+                        None => on_event(AcpEvent::ToolCall { agent_id, update }),
+                    }
                 }
                 Some("plan") => on_event(AcpEvent::Plan { agent_id, update }),
                 _ => {} // user_message_chunk, mode/commands updates: not needed yet
@@ -396,6 +417,65 @@ fn handle_message(
         }
         _ => {} // other notifications: ignore
     }
+}
+
+/// Recognize Task tool calls (Claude Code sub-agents) and fold their updates
+/// into per-sub-agent state. Returns the fresh state when `update` belongs to
+/// a sub-agent, None when it is an ordinary tool call.
+fn track_subagent(agent_id: u32, update: &Value, agents: &Agents) -> Option<SubAgentState> {
+    let id = update.get("toolCallId")?.as_str()?;
+    let mut lock = agents.lock().unwrap();
+    let a = lock.get_mut(&agent_id)?;
+
+    if update["sessionUpdate"] == "tool_call" && !a.subagents.contains_key(id) {
+        let raw = update.get("rawInput");
+        let subtype = raw
+            .and_then(|r| r.get("subagent_type"))
+            .and_then(|v| v.as_str());
+        let title = update.get("title").and_then(|t| t.as_str()).unwrap_or("");
+        if subtype.is_none() && !title.starts_with("Task") {
+            return None;
+        }
+        let task = raw
+            .and_then(|r| r.get("description"))
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                raw.and_then(|r| r.get("prompt"))
+                    .and_then(|v| v.as_str())
+                    .map(|p| p.lines().next().unwrap_or(p))
+            })
+            .unwrap_or(title)
+            .to_owned();
+        let sub = SubAgentState {
+            id: id.to_owned(),
+            name: subtype.unwrap_or("sub-agent").to_owned(),
+            task,
+            status: "working".into(),
+            activity: String::new(),
+            transcript: Vec::new(),
+        };
+        a.subagents.insert(id.to_owned(), sub.clone());
+        return Some(sub);
+    }
+
+    let sub = a.subagents.get_mut(id)?;
+    if let Some(items) = update.get("content").and_then(|c| c.as_array()) {
+        for item in items {
+            if let Some(text) = item.pointer("/content/text").and_then(|t| t.as_str()) {
+                sub.transcript.push(text.to_owned());
+                sub.activity = text.trim_end().lines().last().unwrap_or(text).to_owned();
+            }
+        }
+    }
+    if let Some(status) = update.get("status").and_then(|s| s.as_str()) {
+        sub.status = match status {
+            "completed" => "done",
+            "failed" => "failed",
+            _ => "working",
+        }
+        .into();
+    }
+    Some(sub.clone())
 }
 
 fn chunk_text(update: &Value) -> String {
@@ -537,6 +617,46 @@ mod tests {
             .unwrap();
         let (text, _) = drain_turn(&rx);
         assert_eq!(text, "approved:allow", "agent did not proceed after approval");
+    }
+
+    #[test]
+    fn two_subagent_scenario() {
+        let (bridge, rx, id) = start_ready();
+        bridge.prompt(id, "team").unwrap();
+        let (text, others) = drain_turn(&rx);
+        assert_eq!(text, "merged");
+
+        let subs: Vec<&SubAgentState> = others
+            .iter()
+            .filter_map(|e| match e {
+                AcpEvent::SubAgentUpdate { sub, .. } => Some(sub),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(subs.len(), 5, "expected 5 sub-agent updates: {others:?}");
+        assert!(
+            !others.iter().any(|e| matches!(e, AcpEvent::ToolCall { .. })),
+            "Task calls must not leak as plain tool calls: {others:?}"
+        );
+
+        // spawn moment: both created as working, with task one-liners
+        assert_eq!(subs[0].name, "fe-agent");
+        assert_eq!(subs[0].status, "working");
+        assert_eq!(subs[0].task, "Wire pagination controls into the users list UI");
+        assert_eq!(subs[1].name, "be-agent");
+
+        // be-agent streams activity, then completes with a transcript
+        assert_eq!(subs[2].activity, "reading src/routes/users.ts");
+        assert_eq!(subs[3].status, "done");
+        assert_eq!(
+            subs[3].transcript,
+            vec!["reading src/routes/users.ts", "12 tests pass · +36 −3"]
+        );
+
+        // fe-agent is a shallow stream: done with no transcript
+        assert_eq!(subs[4].id, "task_fe");
+        assert_eq!(subs[4].status, "done");
+        assert!(subs[4].transcript.is_empty());
     }
 
     #[test]

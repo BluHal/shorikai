@@ -4,6 +4,13 @@ import { listen } from "@tauri-apps/api/event";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ToolCard, ToolContentItem, ToolRow } from "./ToolCard";
+import {
+  AgentStrip,
+  DrillBody,
+  DrillCrumb,
+  SubAgent,
+  TeamCard,
+} from "./SubAgents";
 
 type PermissionOption = { optionId: string; name: string; kind?: string };
 
@@ -11,6 +18,7 @@ type Row =
   | { kind: "user"; text: string }
   | { kind: "agent"; text: string; done: boolean }
   | { kind: "system"; text: string; restart?: boolean }
+  | { kind: "team"; ids: string[] }
   | ToolRow
   | {
       kind: "permission";
@@ -72,6 +80,7 @@ type AcpEvent = {
     | "agent_thought"
     | "tool_call"
     | "plan"
+    | "sub_agent_update"
     | "permission_request"
     | "turn_ended"
     | "agent_exit"
@@ -79,6 +88,7 @@ type AcpEvent = {
   agent_id: number;
   text?: string;
   update?: ToolUpdate;
+  sub?: SubAgent;
   request_id?: unknown;
   request?: {
     toolCall?: { title?: string };
@@ -97,11 +107,17 @@ export function ChatPane() {
   const [rows, setRows] = useState<Row[]>([]);
   const [status, setStatus] = useState<Status>("starting");
   const [input, setInput] = useState("");
+  const [subs, setSubs] = useState<SubAgent[]>([]);
+  const [drill, setDrill] = useState<string | null>(null);
   const agentIdRef = useRef<number | null>(null);
+  const subsRef = useRef<SubAgent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const start = async () => {
     setStatus("starting");
+    subsRef.current = [];
+    setSubs([]);
+    setDrill(null);
     try {
       const root = await invoke<string>("project_root");
       agentIdRef.current = await invoke<number>("acp_start", {
@@ -143,6 +159,26 @@ export function ChatPane() {
             setRows((r) => applyToolUpdate(r, u));
           }
           break;
+        case "sub_agent_update": {
+          const sub = ev.sub;
+          if (!sub) break;
+          const isNew = !subsRef.current.some((s) => s.id === sub.id);
+          subsRef.current = isNew
+            ? [...subsRef.current, sub]
+            : subsRef.current.map((s) => (s.id === sub.id ? sub : s));
+          setSubs(subsRef.current);
+          if (isNew) {
+            // consecutive spawns merge into one team card
+            setRows((r) => {
+              const last = r[r.length - 1];
+              if (last?.kind === "team") {
+                return [...r.slice(0, -1), { ...last, ids: [...last.ids, sub.id] }];
+              }
+              return [...r, { kind: "team", ids: [sub.id] }];
+            });
+          }
+          break;
+        }
         case "permission_request":
           setRows((r) => [
             ...r,
@@ -227,6 +263,8 @@ export function ChatPane() {
     dead: "not running",
   };
 
+  const drilledSub = drill ? subs.find((s) => s.id === drill) : undefined;
+
   return (
     <div className="chat-pane">
       <div className="chat-header">
@@ -240,6 +278,19 @@ export function ChatPane() {
         </div>
       </div>
 
+      {drilledSub ? (
+        <DrillCrumb sub={drilledSub} onBack={() => setDrill(null)} />
+      ) : (
+        subs.length > 0 && <AgentStrip subs={subs} onDrill={setDrill} />
+      )}
+
+      {drilledSub ? (
+        <div className="chat-scroll" ref={scrollRef}>
+          <div className="chat-rows">
+            <DrillBody sub={drilledSub} />
+          </div>
+        </div>
+      ) : (
       <div className="chat-scroll" ref={scrollRef}>
         <div className="chat-rows">
           {rows.map((row, i) => {
@@ -270,6 +321,15 @@ export function ChatPane() {
                 );
               case "tool":
                 return <ToolCard key={row.id} row={row} />;
+              case "team":
+                return (
+                  <TeamCard
+                    key={i}
+                    ids={row.ids}
+                    subs={subs}
+                    onDrill={setDrill}
+                  />
+                );
               case "permission":
                 return (
                   <div key={i} className="chat-permission">
@@ -296,6 +356,7 @@ export function ChatPane() {
           {status === "busy" && <div className="chat-working" />}
         </div>
       </div>
+      )}
 
       <div className="chat-input-row">
         <textarea

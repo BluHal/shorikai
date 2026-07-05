@@ -84,6 +84,51 @@ rl.on("line", (line) => {
         send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
         break;
       }
+      if (text === "team") {
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "task_fe",
+          title: "Task: frontend",
+          kind: "other",
+          status: "in_progress",
+          rawInput: {
+            subagent_type: "fe-agent",
+            description: "Wire pagination controls into the users list UI",
+            prompt: "Wire pagination controls...",
+          },
+        });
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "task_be",
+          title: "Task: backend",
+          kind: "other",
+          status: "in_progress",
+          rawInput: {
+            subagent_type: "be-agent",
+            description: "Add offset pagination to GET /users + tests",
+          },
+        });
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "task_be",
+          content: [
+            { type: "content", content: { type: "text", text: "reading src/routes/users.ts" } },
+          ],
+        });
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "task_be",
+          status: "completed",
+          content: [
+            { type: "content", content: { type: "text", text: "12 tests pass · +36 −3" } },
+          ],
+        });
+        // fe-agent stays shallow: no content, straight to completed
+        update({ sessionUpdate: "tool_call_update", toolCallId: "task_fe", status: "completed" });
+        chunk("merged");
+        send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+        break;
+      }
       if (text === "permission") {
         pendingPromptId = msg.id;
         send({
