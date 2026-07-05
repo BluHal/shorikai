@@ -1,10 +1,12 @@
 mod acp_bridge;
 mod pty_host;
+mod workspace_index;
 
 use acp_bridge::{AcpBridge, AcpEvent};
 use pty_host::{PtyEvent, PtyHost};
 use serde_json::Value;
 use tauri::{Emitter, Manager, State};
+use workspace_index::WorkspaceIndex;
 
 #[tauri::command]
 fn pty_spawn(
@@ -94,6 +96,39 @@ fn acp_reset(bridge: State<AcpBridge>) {
     bridge.kill_all();
 }
 
+#[tauri::command]
+fn ws_watch(index: State<WorkspaceIndex>, root: String) -> Result<(), String> {
+    index.watch(std::path::Path::new(&root))
+}
+
+#[tauri::command]
+fn ws_list(path: String) -> Result<Vec<workspace_index::Entry>, String> {
+    workspace_index::list_dir(std::path::Path::new(&path))
+}
+
+/// 10MB cap: keeps huge blobs from freezing the webview; binary files are
+/// rejected rather than mangled.
+#[tauri::command]
+fn fs_read(path: String) -> Result<String, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.len() > 10 * 1024 * 1024 {
+        return Err(format!(
+            "file is too large to open ({:.1} MB, limit 10 MB)",
+            meta.len() as f64 / 1_048_576.0
+        ));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    if bytes.contains(&0) {
+        return Err("binary file".into());
+    }
+    String::from_utf8(bytes).map_err(|_| "file is not valid UTF-8".into())
+}
+
+#[tauri::command]
+fn fs_write(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -110,6 +145,10 @@ pub fn run() {
             app.manage(AcpBridge::new(move |event: AcpEvent| {
                 let _ = handle.emit("acp:event", event);
             }));
+            let handle = app.handle().clone();
+            app.manage(WorkspaceIndex::new(move |dirs| {
+                let _ = handle.emit("ws:changed", serde_json::json!({ "paths": dirs }));
+            }));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -125,6 +164,10 @@ pub fn run() {
             acp_cancel,
             acp_kill,
             acp_reset,
+            ws_watch,
+            ws_list,
+            fs_read,
+            fs_write,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

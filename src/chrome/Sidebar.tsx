@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FilesPanel } from "./FilesPanel";
 
 const FileIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -63,12 +64,14 @@ export function Sidebar() {
         {view === "git" && <span>SOURCE CONTROL</span>}
       </div>
 
-      {/* panel bodies land with issues #8 (tree), #10 (search), #11 (git) */}
-      <div className="sidebar-panel-empty">
-        {view === "files" && "no folder open"}
-        {view === "search" && "search comes soon"}
-        {view === "git" && "git panel comes soon"}
-      </div>
+      {/* search (#10) and git (#11) panels come in later slices */}
+      {view === "files" ? (
+        <FilesPanel />
+      ) : (
+        <div className="sidebar-panel-empty">
+          {view === "search" ? "search comes soon" : "git panel comes soon"}
+        </div>
+      )}
     </div>
   );
 }

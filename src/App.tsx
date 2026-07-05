@@ -10,12 +10,15 @@ import { Sidebar } from "./chrome/Sidebar";
 import { StatusBar } from "./chrome/StatusBar";
 import { TerminalPane } from "./panes/TerminalPane";
 import { ChatPane } from "./panes/ChatPane";
+import { EditorPane } from "./panes/EditorPane";
+import { bus } from "./bus";
 import "dockview-react/dist/styles/dockview.css";
 import "./App.css";
 
 const components = {
   terminal: TerminalPane,
   chat: ChatPane,
+  editor: EditorPane,
 };
 
 let termSeq = 0;
@@ -62,8 +65,10 @@ function handleKey(api: DockviewApi, e: KeyboardEvent): (() => void) | null {
     if (key === "KeyW")
       return () => {
         const p = api.activePanel;
-        // only terminals are closable; the chat pane is the main stage
-        if (p?.id.startsWith("terminal-")) p.api.close();
+        // terminals and editor tabs close; the chat pane is the main stage
+        if (p?.id.startsWith("terminal-") || p?.id.startsWith("editor:")) {
+          p.api.close();
+        }
       };
     if (key === "BracketRight") return () => cycleGroup(api, 1);
     if (key === "BracketLeft") return () => cycleGroup(api, -1);
@@ -101,6 +106,27 @@ function App() {
           : undefined,
       });
       return panel;
+    };
+    bus.openFile = (path) => {
+      const id = `editor:${path}`;
+      const existing = event.api.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      const chat = event.api.getPanel("chat");
+      const anyEditor = event.api.panels.find((p) => p.id.startsWith("editor:"));
+      event.api.addPanel({
+        id,
+        component: "editor",
+        title: path.split("/").pop() ?? path,
+        params: { path },
+        position: anyEditor
+          ? { referencePanel: anyEditor, direction: "within" }
+          : chat
+            ? { referencePanel: chat, direction: "right" }
+            : undefined,
+      });
     };
     // the cockpit always keeps at least one terminal alive
     event.api.onDidRemovePanel(() => {

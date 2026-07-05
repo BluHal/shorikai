@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -17,6 +17,7 @@
     "@xterm/xterm": "^6.0.0",
     "diff": "^9.0.0",
     "dockview-react": "^7.0.2",
+    "monaco-editor": "^0.55.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
