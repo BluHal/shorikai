@@ -9,6 +9,7 @@ import {
 import { Titlebar } from "./chrome/Titlebar";
 import { Sidebar } from "./chrome/Sidebar";
 import { StatusBar } from "./chrome/StatusBar";
+import { SearchOverlay } from "./chrome/SearchOverlay";
 import { TerminalPane } from "./panes/TerminalPane";
 import { ChatPane } from "./panes/ChatPane";
 import { EditorPane } from "./panes/EditorPane";
@@ -95,6 +96,7 @@ function handleKey(api: DockviewApi, e: KeyboardEvent): (() => void) | null {
   const key = e.code;
 
   if (cmd && !shift && !alt && !ctrl) {
+    if (key === "KeyP") return () => bus.openSearch("files");
     if (key === "KeyT") return () => addTerminal(api);
     if (key === "KeyD") return () => addTerminal(api, "right");
     if (key === "KeyW")
@@ -109,6 +111,7 @@ function handleKey(api: DockviewApi, e: KeyboardEvent): (() => void) | null {
     if (key === "BracketLeft") return () => cycleGroup(api, -1);
   }
   if (cmd && shift && !alt && !ctrl) {
+    if (key === "KeyF") return () => bus.openSearch("content");
     if (key === "KeyD") return () => addTerminal(api, "below");
     if (key === "BracketRight") return () => cycleTab(api, 1);
     if (key === "BracketLeft") return () => cycleTab(api, -1);
@@ -350,6 +353,7 @@ function App() {
         {rail && <EditorRail files={rail} onRestore={restoreEditors} />}
       </div>
       <StatusBar />
+      <SearchOverlay />
     </>
   );
 }

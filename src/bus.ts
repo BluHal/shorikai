@@ -5,4 +5,5 @@ export const bus = {
   openDiff: (_path: string, _oldText: string, _newText: string) => {},
   collapseEditor: () => {},
   toggleTerminal: () => {},
+  openSearch: (_mode: "files" | "content") => {},
 };

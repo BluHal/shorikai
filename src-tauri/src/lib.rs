@@ -106,6 +106,20 @@ fn ws_list(path: String) -> Result<Vec<workspace_index::Entry>, String> {
     workspace_index::list_dir(std::path::Path::new(&path))
 }
 
+#[tauri::command]
+fn ws_fuzzy(
+    index: State<WorkspaceIndex>,
+    root: String,
+    query: String,
+) -> Result<Vec<String>, String> {
+    index.fuzzy(&root, &query)
+}
+
+#[tauri::command]
+fn ws_search(root: String, query: String) -> Result<Vec<workspace_index::SearchHit>, String> {
+    workspace_index::search(&root, &query)
+}
+
 /// 10MB cap: keeps huge blobs from freezing the webview; binary files are
 /// rejected rather than mangled.
 #[tauri::command]
@@ -166,6 +180,8 @@ pub fn run() {
             acp_reset,
             ws_watch,
             ws_list,
+            ws_fuzzy,
+            ws_search,
             fs_read,
             fs_write,
         ])
