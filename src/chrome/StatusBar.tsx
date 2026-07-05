@@ -1,3 +1,7 @@
+import { useSyncExternalStore } from "react";
+import { getProjects, subscribeProjects } from "../projects";
+import { getLspState, subscribeLsp } from "../lsp";
+
 const BranchIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
     <circle cx="6" cy="6" r="2.4" />
@@ -7,14 +11,24 @@ const BranchIcon = (
   </svg>
 );
 
-// Skeleton: live vitals (branch, LSP, agent state, cursor, ports) are issue #20.
+// Full live vitals (cursor, ports, git counts) land with issue #20.
 export function StatusBar() {
+  const { active } = useSyncExternalStore(subscribeProjects, getProjects);
+  const lsp = useSyncExternalStore(subscribeLsp, () =>
+    active ? getLspState(active) : undefined,
+  );
+
   return (
     <div className="statusbar">
       <div className="statusbar-seg statusbar-branch">
         {BranchIcon}
         <span>—</span>
       </div>
+      {lsp && (
+        <div className={`statusbar-seg statusbar-lsp-${lsp}`}>
+          {lsp === "running" ? "✓ LSP" : lsp === "starting" ? "… LSP" : "✗ LSP restarting"}
+        </div>
+      )}
       <div className="statusbar-right">
         <span className="statusbar-seg">Ln —, Col —</span>
         <span className="statusbar-seg">UTF-8</span>

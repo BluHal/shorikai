@@ -1,10 +1,12 @@
 mod acp_bridge;
 mod git_status;
+mod lsp_host;
 mod pty_host;
 mod session_state;
 mod workspace_index;
 
 use acp_bridge::{AcpBridge, AcpEvent};
+use lsp_host::LspHost;
 use pty_host::{PtyEvent, PtyHost};
 use serde_json::Value;
 use tauri::{Emitter, Manager, State};
@@ -161,6 +163,31 @@ fn fs_write(path: String, contents: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn lsp_start(
+    host: State<LspHost>,
+    command: String,
+    args: Vec<String>,
+    cwd: String,
+) -> Result<u32, String> {
+    host.start(&command, &args, &cwd)
+}
+
+#[tauri::command]
+fn lsp_send(host: State<LspHost>, id: u32, message: Value) -> Result<(), String> {
+    host.send(id, &message)
+}
+
+#[tauri::command]
+fn lsp_kill(host: State<LspHost>, id: u32) -> Result<(), String> {
+    host.kill(id)
+}
+
+#[tauri::command]
+fn lsp_reset(host: State<LspHost>) {
+    host.kill_all();
+}
+
+#[tauri::command]
 fn git_status_cmd(root: String) -> Result<git_status::GitStatus, String> {
     git_status::status(&root)
 }
@@ -206,6 +233,10 @@ pub fn run() {
             app.manage(WorkspaceIndex::new(move |dirs| {
                 let _ = handle.emit("ws:changed", serde_json::json!({ "paths": dirs }));
             }));
+            let handle = app.handle().clone();
+            app.manage(LspHost::new(move |event| {
+                let _ = handle.emit("lsp:event", event);
+            }));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -235,6 +266,10 @@ pub fn run() {
             git_unstage,
             git_commit,
             git_diff,
+            lsp_start,
+            lsp_send,
+            lsp_kill,
+            lsp_reset,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -242,6 +277,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 app.state::<PtyHost>().kill_all();
                 app.state::<AcpBridge>().kill_all();
+                app.state::<LspHost>().kill_all();
             }
         });
 }

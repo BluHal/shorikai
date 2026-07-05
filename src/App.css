@@ -772,6 +772,21 @@
   color: var(--accent);
 }
 
+.statusbar-lsp-running {
+  color: var(--success);
+  border-left: 1px solid var(--border);
+}
+
+.statusbar-lsp-starting {
+  color: var(--text-3);
+  border-left: 1px solid var(--border);
+}
+
+.statusbar-lsp-crashed {
+  color: var(--warning);
+  border-left: 1px solid var(--border);
+}
+
 .statusbar-right {
   margin-left: auto;
   display: flex;

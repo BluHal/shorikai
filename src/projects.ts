@@ -4,6 +4,7 @@
 import { createContext, useContext } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { DockviewApi } from "dockview-react";
+import { stopLsp } from "./lsp";
 
 export type AgentStatus = "idle" | "working" | "attention";
 
@@ -109,6 +110,7 @@ export function closeProject(root: string) {
   statuses.delete(root);
   state = { ...state, projects, active, statuses };
   invoke("ws_unwatch", { root }).catch(() => {});
+  stopLsp(root);
   emit();
   saveSession();
 }

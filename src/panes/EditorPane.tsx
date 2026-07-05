@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { IDockviewPanelProps } from "dockview-react";
 import { ensureShorikaiTheme, monaco } from "../monacoSetup";
+import { ensureLsp } from "../lsp";
+import { useProjectRoot } from "../projects";
 
 // Saved-version bookkeeping survives pane unmounts (e.g. rail collapse):
 // models are kept alive so dirty edits and undo history come back.
@@ -13,6 +15,7 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
   const ref = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const root = useProjectRoot();
 
   const revealLine = (line: number | undefined) => {
     const editor = editorRef.current;
@@ -39,6 +42,7 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
           model = monaco.editor.createModel(text, undefined, uri);
           savedVersions.set(path, model.getAlternativeVersionId());
         }
+        ensureLsp(root, model);
         const editor = monaco.editor.create(ref.current!, {
           model,
           theme: "shorikai",
