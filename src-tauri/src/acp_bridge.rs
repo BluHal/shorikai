@@ -115,6 +115,11 @@ impl AcpBridge {
         let mut child = Command::new(&config.command)
             .args(&config.args)
             .current_dir(cwd)
+            // shed any enclosing Claude Code session (e.g. when Shorikai is
+            // launched from a Claude Code dev loop), or the agent refuses to run
+            .env_remove("CLAUDECODE")
+            .env_remove("CLAUDE_CODE_SSE_PORT")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
