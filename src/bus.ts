@@ -6,4 +6,5 @@ export const bus = {
   collapseEditor: () => {},
   toggleTerminal: () => {},
   openSearch: (_mode: "files" | "content") => {},
+  startDebugTerminal: () => {},
 };

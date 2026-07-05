@@ -42,8 +42,17 @@ function DockChip(props: IDockviewHeaderActionsProps) {
   }
   if (props.panels.length > 0 && props.panels.every((p) => isTerminalId(p.id))) {
     return (
-      <div className="dock-chip" onClick={() => bus.toggleTerminal()} title="Toggle terminal panel  ⌘J">
-        ⌄
+      <div className="dock-chip-row">
+        <div
+          className="dock-chip dock-chip-debug"
+          onClick={() => bus.startDebugTerminal()}
+          title="New debug terminal — any node process auto-attaches"
+        >
+          ⚡ debug
+        </div>
+        <div className="dock-chip" onClick={() => bus.toggleTerminal()} title="Toggle terminal panel  ⌘J">
+          ⌄
+        </div>
       </div>
     );
   }
@@ -225,6 +234,34 @@ export function Workspace(props: { root: string; visible: boolean }) {
     });
   };
 
+  const addDebugTerminal = (opts: {
+    env: Record<string, string>;
+    title: string;
+    dapReply: { sessionId: number; requestSeq: number };
+  }) => {
+    const api = apiRef.current;
+    if (!api) return;
+    const termGroup = api.groups.find(
+      (g) => g.panels.length > 0 && g.panels.every((p) => isTerminalId(p.id)),
+    );
+    const chat = api.getPanel("chat");
+    api.addPanel({
+      id: `terminal-${++termSeq}`,
+      component: "terminal",
+      title: opts.title,
+      params: { env: opts.env, dapReply: opts.dapReply },
+      position: termGroup
+        ? { referenceGroup: termGroup, direction: "within" }
+        : chat
+          ? { referencePanel: chat, direction: "below" }
+          : undefined,
+    });
+    // a collapsed terminal strip pops open to show the new debug terminal
+    if (termGroup && termGroup.height <= 40) {
+      termGroup.api.setSize({ height: termHeights.current.get(termGroup.id) ?? 240 });
+    }
+  };
+
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     registerWorkspace(root, {
@@ -234,6 +271,7 @@ export function Workspace(props: { root: string; visible: boolean }) {
       collapseEditor: collapseEditors,
       toggleEditor,
       toggleTerminal,
+      addDebugTerminal,
     });
 
     let restored = false;

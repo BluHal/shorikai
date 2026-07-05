@@ -42,6 +42,11 @@ export type WorkspaceHandlers = {
   collapseEditor: () => void;
   toggleEditor: () => void;
   toggleTerminal: () => void;
+  addDebugTerminal: (opts: {
+    env: Record<string, string>;
+    title: string;
+    dapReply: { sessionId: number; requestSeq: number };
+  }) => void;
 };
 const handlers = new Map<string, WorkspaceHandlers>();
 export const registerWorkspace = (root: string, h: WorkspaceHandlers) => {

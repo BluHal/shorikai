@@ -6,7 +6,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -189,7 +189,8 @@ fn kill_group(child: &mut Child) {
 }
 
 /// Read one Content-Length framed JSON-RPC message. Ok(None) on clean EOF.
-fn read_frame(reader: &mut impl BufRead) -> std::io::Result<Option<Value>> {
+/// Shared with dap-core: DAP uses the same framing.
+pub fn read_frame(reader: &mut impl BufRead) -> std::io::Result<Option<Value>> {
     let mut content_length: Option<usize> = None;
     loop {
         let mut line = String::new();

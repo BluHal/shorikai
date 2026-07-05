@@ -8,6 +8,14 @@ import { Workspace, addTerminal, isEditorish } from "./Workspace";
 import { bus } from "./bus";
 import { startGitStore } from "./gitStore";
 import {
+  continuePaused,
+  dismissDebugError,
+  getDebug,
+  startDebugTerminal,
+  subscribeDebug,
+  wireDebug,
+} from "./debug";
+import {
   activeWorkspace,
   getProjects,
   initProjects,
@@ -21,6 +29,37 @@ bus.openFile = (path, line) => activeWorkspace()?.openFile(path, line);
 bus.openDiff = (path, o, n) => activeWorkspace()?.openDiff(path, o, n);
 bus.collapseEditor = () => activeWorkspace()?.collapseEditor();
 bus.toggleTerminal = () => activeWorkspace()?.toggleTerminal();
+bus.startDebugTerminal = () => startDebugTerminal();
+
+function DebugOverlay() {
+  const { paused, error, starting } = useSyncExternalStore(subscribeDebug, getDebug);
+  if (!paused && !error && !starting) return null;
+  return (
+    <div className="debug-overlay">
+      {error ? (
+        <>
+          <span className="debug-overlay-error">{error}</span>
+          <button onClick={dismissDebugError}>dismiss</button>
+        </>
+      ) : starting ? (
+        <>
+          <span className="tool-spinner" />
+          <span>starting debug session…</span>
+        </>
+      ) : (
+        <>
+          <span className="debug-overlay-paused">
+            ⏸ paused
+            {paused?.path
+              ? ` at ${paused.path.split("/").pop()}:${paused.line ?? "?"}`
+              : ""}
+          </span>
+          <button onClick={continuePaused}>▶ continue (F5)</button>
+        </>
+      )}
+    </div>
+  );
+}
 
 function cycleTab(api: DockviewApi, delta: number) {
   const group = api.activeGroup;
@@ -94,16 +133,23 @@ function App() {
 
   useEffect(() => {
     (async () => {
-      // reap PTYs/agents/LSP servers orphaned by a webview reload
+      // reap PTYs/agents/LSP/debug servers orphaned by a webview reload
       await Promise.allSettled([
         invoke("pty_reset"),
         invoke("acp_reset"),
         invoke("lsp_reset"),
+        invoke("dap_reset"),
       ]);
       await initProjects();
       startGitStore();
+      wireDebug();
     })();
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "F5" && getDebug().paused) {
+        e.preventDefault();
+        continuePaused();
+        return;
+      }
       const action = handleKey(e);
       if (action) {
         e.preventDefault();
@@ -127,6 +173,7 @@ function App() {
       </div>
       <StatusBar />
       <SearchOverlay />
+      <DebugOverlay />
     </>
   );
 }

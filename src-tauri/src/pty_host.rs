@@ -38,14 +38,17 @@ impl PtyHost {
         }
     }
 
-    /// Spawn `cmd` (default: `$SHELL -l`) in a new PTY. Returns the session id.
+    /// Spawn `cmd` (default: `$SHELL -l`) in a new PTY. Returns the session
+    /// id and the child pid. `env` adds/overrides variables (debug terminals
+    /// inject NODE_OPTIONS et al.).
     pub fn spawn(
         &self,
         cmd: Option<String>,
         cwd: Option<String>,
         cols: u16,
         rows: u16,
-    ) -> Result<u32, String> {
+        env: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<(u32, Option<u32>), String> {
         let pty = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -66,11 +69,17 @@ impl PtyHost {
         };
         builder.env("TERM", "xterm-256color");
         builder.env("COLORTERM", "truecolor");
+        if let Some(vars) = env {
+            for (k, v) in vars {
+                builder.env(k, v);
+            }
+        }
         if let Some(dir) = cwd {
             builder.cwd(dir);
         }
 
         let child = pty.slave.spawn_command(builder).map_err(|e| e.to_string())?;
+        let child_pid = child.process_id();
         drop(pty.slave);
         let reader = pty.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pty.master.take_writer().map_err(|e| e.to_string())?;
@@ -88,7 +97,7 @@ impl PtyHost {
         let sessions = Arc::clone(&self.sessions);
         let on_event = Arc::clone(&self.on_event);
         std::thread::spawn(move || read_loop(id, reader, sessions, on_event));
-        Ok(id)
+        Ok((id, child_pid))
     }
 
     pub fn write(&self, id: u32, data: &str) -> Result<(), String> {
@@ -194,7 +203,8 @@ mod tests {
             tx.send(e).ok();
         });
 
-        let id = host.spawn(Some("sh".into()), None, 80, 24).unwrap();
+        let (id, pid) = host.spawn(Some("sh".into()), None, 80, 24, None).unwrap();
+        assert!(pid.is_some(), "spawn should report the child pid");
 
         // $((20+3)) keeps the expected string out of the echoed input line.
         host.write(id, "echo round-trip-$((20+3))\r").unwrap();

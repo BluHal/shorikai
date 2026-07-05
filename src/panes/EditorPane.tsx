@@ -11,6 +11,7 @@ import {
   subscribeLsp,
 } from "../lsp";
 import { useProjectRoot } from "../projects";
+import { getBreakpoints, getDebug, subscribeDebug, toggleBreakpoint } from "../debug";
 
 function LspBanner({ root, path }: { root: string; path: string }) {
   const banner = useSyncExternalStore(subscribeLsp, () =>
@@ -78,6 +79,7 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
     const name = path.split("/").pop() ?? path;
     let observer: ResizeObserver | undefined;
     let activeSub: { dispose(): void } | undefined;
+    let debugSub: (() => void) | undefined;
     let disposed = false;
 
     invoke<string>("fs_read", { path }).then(
@@ -103,8 +105,49 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
           padding: { top: 8 },
           renderLineHighlight: "line",
           fixedOverflowWidgets: true,
+          glyphMargin: true,
         });
         editorRef.current = editor;
+
+        // gutter click toggles a breakpoint
+        editor.onMouseDown((e) => {
+          const t = e.target;
+          if (
+            (t.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN ||
+              t.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) &&
+            t.position
+          ) {
+            toggleBreakpoint(path, t.position.lineNumber);
+          }
+        });
+        const decorations = editor.createDecorationsCollection();
+        const renderDebugDecorations = () => {
+          const items: monaco.editor.IModelDeltaDecoration[] = [];
+          for (const line of getBreakpoints(path) ?? []) {
+            items.push({
+              range: new monaco.Range(line, 1, line, 1),
+              options: {
+                glyphMarginClassName: "bp-glyph",
+                stickiness:
+                  monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+              },
+            });
+          }
+          const { paused } = getDebug();
+          if (paused?.path === path && paused.line) {
+            items.push({
+              range: new monaco.Range(paused.line, 1, paused.line, 1),
+              options: {
+                isWholeLine: true,
+                className: "debug-paused-line",
+                glyphMarginClassName: "paused-glyph",
+              },
+            });
+          }
+          decorations.set(items);
+        };
+        renderDebugDecorations();
+        debugSub = subscribeDebug(renderDebugDecorations);
 
         const syncTitle = () => {
           const dirty =
@@ -138,6 +181,7 @@ export function EditorPane(props: IDockviewPanelProps<Params>) {
       disposed = true;
       observer?.disconnect();
       activeSub?.dispose();
+      debugSub?.();
       editorRef.current?.dispose();
       editorRef.current = null;
       // model intentionally kept: reopening restores dirty edits + undo stack

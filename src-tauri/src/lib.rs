@@ -1,4 +1,5 @@
 mod acp_bridge;
+mod dap_core;
 mod git_status;
 mod lsp_host;
 mod pty_host;
@@ -6,6 +7,7 @@ mod session_state;
 mod workspace_index;
 
 use acp_bridge::{AcpBridge, AcpEvent};
+use dap_core::DapCore;
 use lsp_host::LspHost;
 use pty_host::{PtyEvent, PtyHost};
 use serde_json::Value;
@@ -19,8 +21,9 @@ fn pty_spawn(
     cwd: Option<String>,
     cols: u16,
     rows: u16,
-) -> Result<u32, String> {
-    host.spawn(cmd, cwd, cols, rows)
+    env: Option<std::collections::HashMap<String, String>>,
+) -> Result<(u32, Option<u32>), String> {
+    host.spawn(cmd, cwd, cols, rows, env)
 }
 
 #[tauri::command]
@@ -188,6 +191,46 @@ fn lsp_reset(host: State<LspHost>) {
 }
 
 #[tauri::command]
+async fn dap_start_debug_terminal(
+    core: State<'_, std::sync::Arc<DapCore>>,
+    root: String,
+) -> Result<u32, String> {
+    let core = std::sync::Arc::clone(&core);
+    tauri::async_runtime::spawn_blocking(move || core.start_debug_terminal(&root))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn dap_reply_run_in_terminal(
+    core: State<std::sync::Arc<DapCore>>,
+    session_id: u32,
+    request_seq: i64,
+    shell_pid: Option<u32>,
+) -> Result<(), String> {
+    core.reply_run_in_terminal(session_id, request_seq, shell_pid)
+}
+
+#[tauri::command]
+fn dap_set_breakpoints(core: State<std::sync::Arc<DapCore>>, path: String, lines: Vec<u32>) {
+    core.set_breakpoints(&path, lines);
+}
+
+#[tauri::command]
+fn dap_continue(
+    core: State<std::sync::Arc<DapCore>>,
+    session_id: u32,
+    thread_id: i64,
+) -> Result<(), String> {
+    core.continue_(session_id, thread_id)
+}
+
+#[tauri::command]
+fn dap_reset(core: State<std::sync::Arc<DapCore>>) {
+    core.stop_all();
+}
+
+#[tauri::command]
 fn lsp_servers() -> Result<Value, String> {
     lsp_host::load_server_config()
 }
@@ -254,6 +297,10 @@ pub fn run() {
             app.manage(LspHost::new(move |event| {
                 let _ = handle.emit("lsp:event", event);
             }));
+            let handle = app.handle().clone();
+            app.manage(std::sync::Arc::new(DapCore::new(move |event| {
+                let _ = handle.emit("dap:event", event);
+            })));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -290,6 +337,11 @@ pub fn run() {
             lsp_servers,
             which_cmd,
             lsp_install,
+            dap_start_debug_terminal,
+            dap_reply_run_in_terminal,
+            dap_set_breakpoints,
+            dap_continue,
+            dap_reset,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -298,6 +350,7 @@ pub fn run() {
                 app.state::<PtyHost>().kill_all();
                 app.state::<AcpBridge>().kill_all();
                 app.state::<LspHost>().kill_all();
+                app.state::<std::sync::Arc<DapCore>>().stop_all();
             }
         });
 }

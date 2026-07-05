@@ -8,7 +8,14 @@ import type { IDockviewPanelProps } from "dockview-react";
 import { useProjectRoot } from "../projects";
 import "@xterm/xterm/css/xterm.css";
 
-export function TerminalPane(props: IDockviewPanelProps) {
+type TerminalParams = {
+  /// extra env vars (debug terminals inject the js-debug bootloader here)
+  env?: Record<string, string>;
+  /// reverse-request handle to answer once the shell is up
+  dapReply?: { sessionId: number; requestSeq: number };
+};
+
+export function TerminalPane(props: IDockviewPanelProps<TerminalParams>) {
   const ref = useRef<HTMLDivElement>(null);
   const root = useProjectRoot();
 
@@ -66,17 +73,26 @@ export function TerminalPane(props: IDockviewPanelProps) {
       if (e.payload.id === ptyId) props.api.close();
     });
 
-    invoke<number>("pty_spawn", {
+    invoke<[number, number | null]>("pty_spawn", {
       cols: term.cols,
       rows: term.rows,
       cwd: root,
+      env: props.params?.env,
     }).then(
-      (id) => {
+      ([id, pid]) => {
         if (disposed) {
           invoke("pty_kill", { id }).catch(() => {});
           return;
         }
         ptyId = id;
+        const reply = props.params?.dapReply;
+        if (reply) {
+          invoke("dap_reply_run_in_terminal", {
+            sessionId: reply.sessionId,
+            requestSeq: reply.requestSeq,
+            shellPid: pid,
+          }).catch(() => {});
+        }
       },
       (err) => term.write(`\r\nfailed to spawn shell: ${err}\r\n`),
     );
