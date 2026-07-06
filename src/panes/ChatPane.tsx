@@ -20,6 +20,12 @@ type PermissionOption = { optionId: string; name: string; kind?: string };
 
 type PlanEntry = { content: string; status: string };
 
+type SlashCommand = {
+  name: string;
+  description: string;
+  input?: { hint?: string } | null;
+};
+
 type Row =
   | { kind: "user"; text: string; queued?: boolean; qid?: number }
   | { kind: "agent"; text: string; done: boolean }
@@ -95,6 +101,7 @@ type AcpEvent = {
     | "plan"
     | "sub_agent_update"
     | "config_options"
+    | "available_commands"
     | "permission_request"
     | "turn_ended"
     | "agent_exit"
@@ -105,6 +112,7 @@ type AcpEvent = {
   update?: ToolUpdate & { entries?: PlanEntry[] };
   sub?: SubAgent;
   options?: ConfigState & { currentModeId?: string };
+  commands?: SlashCommand[];
   request_id?: unknown;
   request?: {
     toolCall?: { title?: string };
@@ -220,6 +228,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const [agent, setAgent] = useState("claude-code");
   const [agents, setAgents] = useState<Record<string, AgentConfig>>({});
   const [config, setConfig] = useState<ConfigState>({});
+  const [commands, setCommands] = useState<SlashCommand[]>([]);
+  const [cmdSel, setCmdSel] = useState(0);
+  const [cmdDismissed, setCmdDismissed] = useState(false);
   const [effort, setEffort] = useState("high");
   const [ctxTokens, setCtxTokens] = useState<number | null>(null);
   const [plan, setPlan] = useState<{ utilization: number; resets_at: string } | null>(null);
@@ -256,6 +267,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     setSubs([]);
     setDrill(null);
     setConfig({});
+    setCommands([]);
     sessionIdRef.current = "";
     setCtxTokens(null);
     queueRef.current = [];
@@ -380,6 +392,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           }));
           break;
         }
+        case "available_commands":
+          setCommands(ev.commands ?? []);
+          break;
         case "permission_request":
           setAgentStatus(root, "attention");
           setRows((r) => [
@@ -531,6 +546,22 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   };
 
   const drilledSub = drill ? subs.find((s) => s.id === drill) : undefined;
+
+  // slash-command popup: open while the first token is being typed
+  const cmdQuery =
+    input.startsWith("/") && !/[\s]/.test(input) ? input.slice(1) : null;
+  const cmdMatches =
+    cmdQuery != null && !cmdDismissed
+      ? commands
+          .filter((c) => c.name.toLowerCase().includes(cmdQuery.toLowerCase()))
+          .slice(0, 8)
+      : [];
+  const cmdIndex = Math.min(cmdSel, Math.max(cmdMatches.length - 1, 0));
+
+  const pickCommand = (c: SlashCommand) => {
+    setInput(`/${c.name} `);
+    setCmdSel(0);
+  };
 
   const advertised = config.models?.availableModels ?? [];
   const modelOptions = config.models
@@ -714,6 +745,26 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
       )}
 
       <div className="chat-input-row">
+        {cmdMatches.length > 0 && (
+          <div className="chat-cmd-menu">
+            {cmdMatches.map((c, j) => (
+              <button
+                key={c.name}
+                className={`chat-cmd-item${j === cmdIndex ? " chat-cmd-active" : ""}`}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // keep textarea focus
+                  pickCommand(c);
+                }}
+              >
+                <span className="chat-cmd-name">/{c.name}</span>
+                {c.input?.hint && (
+                  <span className="chat-cmd-hint">{c.input.hint}</span>
+                )}
+                <span className="chat-cmd-desc">{c.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           className="chat-input"
           rows={2}
@@ -726,8 +777,32 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                 : statusText[status]
           }
           disabled={status === "dead"}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setCmdDismissed(false);
+          }}
           onKeyDown={(e) => {
+            if (cmdMatches.length > 0) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setCmdSel((cmdIndex + 1) % cmdMatches.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setCmdSel((cmdIndex - 1 + cmdMatches.length) % cmdMatches.length);
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                pickCommand(cmdMatches[cmdIndex]);
+                return;
+              }
+              if (e.key === "Escape") {
+                setCmdDismissed(true);
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();

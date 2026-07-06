@@ -173,6 +173,18 @@ rl.on("line", (line) => {
         });
         break;
       }
+      if (text === "commands") {
+        update({
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            { name: "compact", description: "Compact the conversation", input: null },
+            { name: "review", description: "Review a pull request", input: { hint: "pr number" } },
+          ],
+        });
+        chunk("done");
+        send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+        break;
+      }
       if (text === "plan") {
         update({
           sessionUpdate: "plan",

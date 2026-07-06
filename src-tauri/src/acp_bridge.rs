@@ -27,6 +27,8 @@ pub enum AcpEvent {
     /// modes/models offered by the agent (from session/new), plus
     /// currentModeId-only updates when the agent switches mode itself
     ConfigOptions { agent_id: u32, options: Value },
+    /// slash commands advertised via available_commands_update
+    AvailableCommands { agent_id: u32, commands: Value },
     PermissionRequest { agent_id: u32, request_id: Value, request: Value },
     TurnEnded { agent_id: u32, stop_reason: String },
     AgentExit { agent_id: u32, code: Option<i32> },
@@ -482,7 +484,11 @@ fn handle_message(
                     agent_id,
                     options: json!({ "currentModeId": update.get("currentModeId") }),
                 }),
-                _ => {} // user_message_chunk, commands updates: not needed yet
+                Some("available_commands_update") => on_event(AcpEvent::AvailableCommands {
+                    agent_id,
+                    commands: update.get("availableCommands").cloned().unwrap_or(Value::Null),
+                }),
+                _ => {} // user_message_chunk: not needed yet
             }
         }
         _ => {} // other notifications: ignore
@@ -738,6 +744,24 @@ mod tests {
         assert_eq!(subs[4].id, "task_fe");
         assert_eq!(subs[4].status, "done");
         assert!(subs[4].transcript.is_empty());
+    }
+
+    #[test]
+    fn available_commands_pass_through() {
+        let (bridge, rx, id) = start_ready();
+        bridge.prompt(id, "commands").unwrap();
+        let (text, others) = drain_turn(&rx);
+        assert_eq!(text, "done");
+        let commands = others
+            .iter()
+            .find_map(|e| match e {
+                AcpEvent::AvailableCommands { commands, .. } => Some(commands),
+                _ => None,
+            })
+            .expect("no AvailableCommands event");
+        assert_eq!(commands[0]["name"], "compact");
+        assert_eq!(commands[1]["input"]["hint"], "pr number");
+        bridge.kill(id).unwrap();
     }
 
     #[test]

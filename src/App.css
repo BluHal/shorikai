@@ -2085,9 +2085,64 @@
 }
 
 .chat-input-row {
+  position: relative;
   flex: none;
   border-top: 1px solid var(--border);
   padding: 12px 24px;
+}
+
+/* slash-command autocomplete, floating above the input */
+.chat-cmd-menu {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100% - 48px));
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 3px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.chat-cmd-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  padding: 5px 9px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+}
+
+.chat-cmd-item:hover,
+.chat-cmd-active {
+  background: var(--surface-3);
+}
+
+.chat-cmd-name {
+  color: var(--accent);
+  flex: none;
+}
+
+.chat-cmd-hint {
+  color: var(--text-4);
+  font-style: italic;
+  flex: none;
+}
+
+.chat-cmd-desc {
+  color: var(--text-3);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .chat-input {
