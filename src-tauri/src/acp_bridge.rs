@@ -15,24 +15,66 @@ use std::time::Duration;
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AcpEvent {
-    SessionReady { agent_id: u32, session_id: String },
-    AgentText { agent_id: u32, text: String },
-    AgentThought { agent_id: u32, text: String },
+    SessionReady {
+        agent_id: u32,
+        session_id: String,
+    },
+    AgentText {
+        agent_id: u32,
+        text: String,
+    },
+    AgentThought {
+        agent_id: u32,
+        text: String,
+    },
+    /// user messages replayed by session/load
+    UserText {
+        agent_id: u32,
+        text: String,
+    },
     /// tool_call and tool_call_update, passed through raw for the card UI (#6)
-    ToolCall { agent_id: u32, update: Value },
-    Plan { agent_id: u32, update: Value },
+    ToolCall {
+        agent_id: u32,
+        update: Value,
+    },
+    Plan {
+        agent_id: u32,
+        update: Value,
+    },
     /// Task tool calls normalized into sub-agent state; full state per event
     /// so the frontend just replaces by id
-    SubAgentUpdate { agent_id: u32, sub: SubAgentState },
+    SubAgentUpdate {
+        agent_id: u32,
+        sub: SubAgentState,
+    },
     /// modes/models offered by the agent (from session/new), plus
     /// currentModeId-only updates when the agent switches mode itself
-    ConfigOptions { agent_id: u32, options: Value },
+    ConfigOptions {
+        agent_id: u32,
+        options: Value,
+    },
     /// slash commands advertised via available_commands_update
-    AvailableCommands { agent_id: u32, commands: Value },
-    PermissionRequest { agent_id: u32, request_id: Value, request: Value },
-    TurnEnded { agent_id: u32, stop_reason: String },
-    AgentExit { agent_id: u32, code: Option<i32> },
-    Error { agent_id: u32, message: String },
+    AvailableCommands {
+        agent_id: u32,
+        commands: Value,
+    },
+    PermissionRequest {
+        agent_id: u32,
+        request_id: Value,
+        request: Value,
+    },
+    TurnEnded {
+        agent_id: u32,
+        stop_reason: String,
+    },
+    AgentExit {
+        agent_id: u32,
+        code: Option<i32>,
+    },
+    Error {
+        agent_id: u32,
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -135,10 +177,18 @@ impl AcpBridge {
     }
 
     /// Spawn an agent adapter and run the ACP handshake (initialize +
-    /// session/new with `cwd`) in the background; SessionReady or Error
-    /// arrives on the event stream. `meta` is passed as session/new `_meta`
-    /// (e.g. claude-code adapter options like effort).
-    pub fn start(&self, config: &AgentConfig, cwd: &str, meta: Option<Value>) -> Result<u32, String> {
+    /// session/new with `cwd`, or session/load when `resume` names a past
+    /// session) in the background; SessionReady or Error arrives on the
+    /// event stream. `meta` is passed as `_meta` (e.g. claude-code adapter
+    /// options like effort). A resumed session replays its history as
+    /// UserText/AgentText events before SessionReady.
+    pub fn start(
+        &self,
+        config: &AgentConfig,
+        cwd: &str,
+        meta: Option<Value>,
+        resume: Option<String>,
+    ) -> Result<u32, String> {
         let mut child = Command::new(&config.command)
             .args(&config.args)
             .current_dir(cwd)
@@ -178,26 +228,34 @@ impl AcpBridge {
         let agents = Arc::clone(&self.agents);
         let on_event = Arc::clone(&self.on_event);
         let cwd = cwd.to_owned();
-        std::thread::spawn(move || match handshake(agent_id, &cwd, meta, &agents) {
-            Err(message) => on_event(AcpEvent::Error { agent_id, message }),
-            Ok(result) => {
-                let session_id = result
-                    .get("sessionId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_owned();
-                on_event(AcpEvent::SessionReady { agent_id, session_id });
-                let mut options = serde_json::Map::new();
-                for key in ["modes", "models"] {
-                    if let Some(v) = result.get(key).filter(|v| !v.is_null()) {
-                        options.insert(key.into(), v.clone());
+        std::thread::spawn(
+            move || match handshake(agent_id, &cwd, meta, resume, &agents) {
+                Err(message) => on_event(AcpEvent::Error { agent_id, message }),
+                Ok(result) => {
+                    let session_id = result
+                        .get("sessionId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_owned();
+                    on_event(AcpEvent::SessionReady {
+                        agent_id,
+                        session_id,
+                    });
+                    let mut options = serde_json::Map::new();
+                    for key in ["modes", "models", "configOptions"] {
+                        if let Some(v) = result.get(key).filter(|v| !v.is_null()) {
+                            options.insert(key.into(), v.clone());
+                        }
+                    }
+                    if !options.is_empty() {
+                        on_event(AcpEvent::ConfigOptions {
+                            agent_id,
+                            options: options.into(),
+                        });
                     }
                 }
-                if !options.is_empty() {
-                    on_event(AcpEvent::ConfigOptions { agent_id, options: options.into() });
-                }
-            }
-        });
+            },
+        );
 
         Ok(agent_id)
     }
@@ -237,7 +295,10 @@ impl AcpBridge {
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown")
                         .to_owned();
-                    on_event(AcpEvent::TurnEnded { agent_id, stop_reason });
+                    on_event(AcpEvent::TurnEnded {
+                        agent_id,
+                        stop_reason,
+                    });
                 }
                 Ok(Err(message)) => on_event(AcpEvent::Error { agent_id, message }),
                 // channel closed: process exited, AgentExit already emitted
@@ -290,6 +351,22 @@ impl AcpBridge {
         .map(drop)
     }
 
+    pub fn set_config_option(
+        &self,
+        agent_id: u32,
+        config_id: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        let session_id = self.session_id(agent_id)?;
+        send_request(
+            &self.agents,
+            agent_id,
+            "session/set_config_option",
+            json!({ "sessionId": session_id, "configId": config_id, "value": value }),
+        )
+        .map(drop)
+    }
+
     pub fn cancel(&self, agent_id: u32) -> Result<(), String> {
         let session_id = self.session_id(agent_id)?;
         write_message(
@@ -331,6 +408,7 @@ fn handshake(
     agent_id: u32,
     cwd: &str,
     meta: Option<Value>,
+    resume: Option<String>,
     agents: &Agents,
 ) -> Result<Value, String> {
     // generous timeout: `npx` may download the adapter on first run
@@ -358,13 +436,24 @@ fn handshake(
     if let Some(m) = meta {
         params["_meta"] = m;
     }
-    let rx = send_request(agents, agent_id, "session/new", params)?;
-    let result = recv(rx)?;
-    let session_id = result
-        .get("sessionId")
-        .and_then(|v| v.as_str())
-        .ok_or("session/new returned no sessionId")?
-        .to_owned();
+    let (method, session_id) = if let Some(id) = resume {
+        params["sessionId"] = Value::String(id.clone());
+        ("session/load", id)
+    } else {
+        ("session/new", String::new())
+    };
+    let rx = send_request(agents, agent_id, method, params)?;
+    let mut result = recv(rx)?;
+    let session_id = if method == "session/new" {
+        result
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .ok_or("session/new returned no sessionId")?
+            .to_owned()
+    } else {
+        result["sessionId"] = Value::String(session_id.clone());
+        session_id
+    };
     if let Some(a) = agents.lock().unwrap().get_mut(&agent_id) {
         a.session_id = Some(session_id);
     }
@@ -414,9 +503,11 @@ fn read_loop(
         }
     }
     // EOF: agent process is gone
-    let code = agents.lock().unwrap().remove(&agent_id).and_then(|mut a| {
-        a.child.wait().ok().and_then(|s| s.code())
-    });
+    let code = agents
+        .lock()
+        .unwrap()
+        .remove(&agent_id)
+        .and_then(|mut a| a.child.wait().ok().and_then(|s| s.code()));
     on_event(AcpEvent::AgentExit { agent_id, code });
 }
 
@@ -440,7 +531,12 @@ fn handle_message(
         } else {
             Ok(msg.get("result").cloned().unwrap_or(Value::Null))
         };
-        if let Some(tx) = agents.lock().unwrap().get_mut(&agent_id).and_then(|a| a.pending.remove(&id)) {
+        if let Some(tx) = agents
+            .lock()
+            .unwrap()
+            .get_mut(&agent_id)
+            .and_then(|a| a.pending.remove(&id))
+        {
             let _ = tx.send(outcome);
         }
         return;
@@ -466,13 +562,20 @@ fn handle_message(
             );
         }
         (Some("session/update"), None) => {
-            let update = msg.pointer("/params/update").cloned().unwrap_or(Value::Null);
+            let update = msg
+                .pointer("/params/update")
+                .cloned()
+                .unwrap_or(Value::Null);
             match update.get("sessionUpdate").and_then(|k| k.as_str()) {
                 Some("agent_message_chunk") => on_event(AcpEvent::AgentText {
                     agent_id,
                     text: chunk_text(&update),
                 }),
                 Some("agent_thought_chunk") => on_event(AcpEvent::AgentThought {
+                    agent_id,
+                    text: chunk_text(&update),
+                }),
+                Some("user_message_chunk") => on_event(AcpEvent::UserText {
                     agent_id,
                     text: chunk_text(&update),
                 }),
@@ -487,9 +590,16 @@ fn handle_message(
                     agent_id,
                     options: json!({ "currentModeId": update.get("currentModeId") }),
                 }),
+                Some("config_option_update") => on_event(AcpEvent::ConfigOptions {
+                    agent_id,
+                    options: json!({ "configOptions": update.get("configOptions") }),
+                }),
                 Some("available_commands_update") => on_event(AcpEvent::AvailableCommands {
                     agent_id,
-                    commands: update.get("availableCommands").cloned().unwrap_or(Value::Null),
+                    commands: update
+                        .get("availableCommands")
+                        .cloned()
+                        .unwrap_or(Value::Null),
                 }),
                 _ => {} // user_message_chunk: not needed yet
             }
@@ -586,7 +696,7 @@ mod tests {
         let bridge = AcpBridge::new(move |e| {
             tx.send(e).ok();
         });
-        let id = bridge.start(&fake_agent(), "/tmp", None).unwrap();
+        let id = bridge.start(&fake_agent(), "/tmp", None, None).unwrap();
         match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
             AcpEvent::SessionReady { session_id, .. } => assert_eq!(session_id, "sess_fake"),
             other => panic!("expected SessionReady, got {other:?}"),
@@ -596,7 +706,9 @@ mod tests {
             AcpEvent::ConfigOptions { options, .. } => {
                 assert_eq!(options.pointer("/modes/currentModeId").unwrap(), "default");
                 assert_eq!(
-                    options.pointer("/models/availableModels/1/modelId").unwrap(),
+                    options
+                        .pointer("/models/availableModels/1/modelId")
+                        .unwrap(),
                     "opus"
                 );
             }
@@ -706,7 +818,10 @@ mod tests {
             .respond_permission(id, request_id, Some("allow".into()))
             .unwrap();
         let (text, _) = drain_turn(&rx);
-        assert_eq!(text, "approved:allow", "agent did not proceed after approval");
+        assert_eq!(
+            text, "approved:allow",
+            "agent did not proceed after approval"
+        );
     }
 
     #[test]
@@ -725,14 +840,19 @@ mod tests {
             .collect();
         assert_eq!(subs.len(), 5, "expected 5 sub-agent updates: {others:?}");
         assert!(
-            !others.iter().any(|e| matches!(e, AcpEvent::ToolCall { .. })),
+            !others
+                .iter()
+                .any(|e| matches!(e, AcpEvent::ToolCall { .. })),
             "Task calls must not leak as plain tool calls: {others:?}"
         );
 
         // spawn moment: both created as working, with task one-liners
         assert_eq!(subs[0].name, "fe-agent");
         assert_eq!(subs[0].status, "working");
-        assert_eq!(subs[0].task, "Wire pagination controls into the users list UI");
+        assert_eq!(
+            subs[0].task,
+            "Wire pagination controls into the users list UI"
+        );
         assert_eq!(subs[1].name, "be-agent");
 
         // be-agent streams activity, then completes with a transcript
@@ -780,6 +900,53 @@ mod tests {
             .unwrap();
         let (text, _) = drain_turn(&rx);
         assert_eq!(text, "images:1:image/png");
+        bridge.kill(id).unwrap();
+    }
+
+    #[test]
+    fn session_load_replays_history_and_continues() {
+        let (tx, rx) = mpsc::channel();
+        let bridge = AcpBridge::new(move |e| {
+            tx.send(e).ok();
+        });
+        let id = bridge
+            .start(&fake_agent(), "/tmp", None, Some("sess_old".into()))
+            .unwrap();
+
+        let mut replay = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()).unwrap() {
+                AcpEvent::SessionReady { session_id, .. } => {
+                    assert_eq!(session_id, "sess_old");
+                    break;
+                }
+                ev => replay.push(ev),
+            }
+        }
+        assert!(
+            replay
+                .iter()
+                .any(|e| matches!(e, AcpEvent::UserText { text, .. } if text == "old question")),
+            "missing replayed user text: {replay:?}"
+        );
+        assert!(
+            replay
+                .iter()
+                .any(|e| matches!(e, AcpEvent::AgentText { text, .. } if text == "old answer")),
+            "missing replayed agent text: {replay:?}"
+        );
+
+        // config options may arrive after SessionReady
+        loop {
+            match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                AcpEvent::ConfigOptions { .. } => break,
+                _ => {}
+            }
+        }
+        bridge.prompt(id, "hi").unwrap();
+        let (text, _) = drain_turn(&rx);
+        assert_eq!(text, "Hello world");
         bridge.kill(id).unwrap();
     }
 
@@ -856,6 +1023,25 @@ mod tests {
     }
 
     #[test]
+    fn config_options_pass_through_and_update() {
+        let (bridge, rx, id) = start_ready();
+        bridge.set_config_option(id, "model", "gpt-5.2").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()).unwrap() {
+                AcpEvent::ConfigOptions { options, .. }
+                    if options.pointer("/configOptions/0/currentValue")
+                        == Some(&json!("gpt-5.2")) =>
+                {
+                    break
+                }
+                _ => {}
+            }
+        }
+        bridge.kill(id).unwrap();
+    }
+
+    #[test]
     fn kill_reaches_wrapper_grandchildren() {
         // agent behind a wrapper (like npx): sh forks node, which inherits
         // the stdout pipe. Without a process-group kill, killing sh leaves
@@ -874,7 +1060,7 @@ mod tests {
                 ),
             ],
         };
-        let id = bridge.start(&wrapper, "/tmp", None).unwrap();
+        let id = bridge.start(&wrapper, "/tmp", None, None).unwrap();
         match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
             AcpEvent::SessionReady { .. } => {}
             other => panic!("expected SessionReady, got {other:?}"),
@@ -897,9 +1083,9 @@ mod tests {
         let (text, others) = drain_turn(&rx);
         assert_eq!(text, "Hello world");
         assert!(
-            others
-                .iter()
-                .any(|e| matches!(e, AcpEvent::Error { message, .. } if message.contains("malformed"))),
+            others.iter().any(
+                |e| matches!(e, AcpEvent::Error { message, .. } if message.contains("malformed"))
+            ),
             "no malformed-message error in {others:?}"
         );
         // bridge still works after the malformed line

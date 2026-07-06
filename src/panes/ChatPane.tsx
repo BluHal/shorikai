@@ -28,6 +28,12 @@ type SlashCommand = {
 
 type Attachment = { id: number; mediaType: string; data: string };
 
+type ClaudeSession = {
+  sessionId: string;
+  title: string;
+  updatedAt: number;
+};
+
 type Row =
   | {
       kind: "user";
@@ -97,13 +103,33 @@ function applyToolUpdate(rows: Row[], u: ToolUpdate): Row[] {
 }
 
 type ConfigState = {
-  modes?: { currentModeId: string; availableModes: { id: string; name: string }[] };
+  modes?: {
+    currentModeId: string;
+    availableModes: { id: string; name: string; description?: string | null }[];
+  };
   models?: { currentModelId: string; availableModels: { modelId: string; name: string }[] };
+  configOptions?: SessionConfigOption[];
+};
+
+type SessionConfigValue = {
+  value: string;
+  name: string;
+  description?: string | null;
+};
+
+type SessionConfigOption = {
+  id: string;
+  name: string;
+  category?: string | null;
+  description?: string | null;
+  currentValue: string;
+  options: (SessionConfigValue | { group: string; name: string; options: SessionConfigValue[] })[];
 };
 
 type AcpEvent = {
   kind:
     | "session_ready"
+    | "user_text"
     | "agent_text"
     | "agent_thought"
     | "tool_call"
@@ -166,7 +192,7 @@ const fmtTokens = (n: number) =>
 /// App-styled replacement for a native <select>: button + popup list.
 function Dropdown(props: {
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; description?: string | null }[];
   onChange: (value: string) => void;
   title?: string;
   disabled?: boolean;
@@ -209,6 +235,7 @@ function Dropdown(props: {
           {props.options.map((o) => (
             <button
               key={o.value}
+              title={o.description ?? undefined}
               className={`chat-dd-item${
                 o.value === props.value ? " chat-dd-active" : ""
               }`}
@@ -236,6 +263,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const [drill, setDrill] = useState<string | null>(null);
   const [agent, setAgent] = useState("claude-code");
   const [agents, setAgents] = useState<Record<string, AgentConfig>>({});
+  const [history, setHistory] = useState<ClaudeSession[]>([]);
   const [config, setConfig] = useState<ConfigState>({});
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [cmdSel, setCmdSel] = useState(0);
@@ -278,7 +306,14 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
       .catch(() => {});
   };
 
-  const start = async (name = agentRef.current) => {
+  const refreshHistory = () => {
+    if (!agentRef.current.startsWith("claude")) return;
+    invoke<ClaudeSession[]>("claude_session_history", { cwd: root })
+      .then(setHistory)
+      .catch(() => setHistory([]));
+  };
+
+  const start = async (name = agentRef.current, resume?: string) => {
     setStatus("starting");
     subsRef.current = [];
     setSubs([]);
@@ -295,6 +330,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
         cwd: root,
         // effort is a claude-code SDK option; other agents don't understand it
         effort: name.startsWith("claude") ? effortRef.current : null,
+        resume: resume ?? null,
       });
     } catch (err) {
       setStatus("dead");
@@ -303,6 +339,14 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
         { kind: "system", text: `failed to start agent: ${err}`, restart: true },
       ]);
     }
+  };
+
+  const restartSession = (resume?: string) => {
+    const oldId = agentIdRef.current;
+    if (oldId != null) invoke("acp_kill", { id: oldId }).catch(() => {});
+    agentIdRef.current = null;
+    setRows([]);
+    start(agentRef.current, resume);
   };
 
   const switchAgent = (name: string) => {
@@ -323,8 +367,33 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
       switch (ev.kind) {
         case "session_ready":
           sessionIdRef.current = ev.session_id ?? "";
+          setRows((r) =>
+            r.map((row) =>
+              (row.kind === "agent" || row.kind === "thought") && !row.done
+                ? { ...row, done: true }
+                : row,
+            ),
+          );
           setStatus("ready");
           refreshUsage();
+          refreshHistory();
+          break;
+        case "user_text":
+          setRows((r) => {
+            const closed = r.map((row) =>
+              (row.kind === "agent" || row.kind === "thought") && !row.done
+                ? { ...row, done: true }
+                : row,
+            );
+            const last = closed[closed.length - 1];
+            if (last?.kind === "user" && !last.queued) {
+              return [
+                ...closed.slice(0, -1),
+                { ...last, text: last.text + (ev.text ?? "") },
+              ];
+            }
+            return [...closed, { kind: "user", text: ev.text ?? "" }];
+          });
           break;
         case "agent_text":
           setRows((r) => {
@@ -406,6 +475,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                 ? { ...c.modes, currentModeId: o.currentModeId }
                 : c.modes),
             models: o.models ?? c.models,
+            configOptions: o.configOptions ?? c.configOptions,
           }));
           break;
         }
@@ -470,6 +540,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     invoke<Record<string, AgentConfig>>("acp_agents")
       .then(setAgents)
       .catch(() => {});
+    refreshHistory();
     trackGitRoot(root);
     start();
     return () => {
@@ -571,6 +642,20 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     );
   };
 
+  const setConfigOption = (configId: string, value: string) => {
+    invoke("acp_set_config_option", {
+      id: agentIdRef.current,
+      configId,
+      value,
+    }).catch(() => {});
+    setConfig((c) => ({
+      ...c,
+      configOptions: c.configOptions?.map((o) =>
+        o.id === configId ? { ...o, currentValue: value } : o,
+      ),
+    }));
+  };
+
   // effort is fixed at session creation, so changing it restarts the session
   const changeEffort = (e: string) => {
     setEffort(e);
@@ -593,6 +678,13 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   };
 
   const drilledSub = drill ? subs.find((s) => s.id === drill) : undefined;
+  const historyOptions = [
+    { value: "__new", label: "new session" },
+    ...history.map((h) => ({
+      value: h.sessionId,
+      label: `${new Date(h.updatedAt * 1000).toLocaleString()} · ${h.title}`,
+    })),
+  ];
 
   // slash-command popup: open while the first token is being typed
   const cmdQuery =
@@ -649,14 +741,43 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   };
 
   const advertised = config.models?.availableModels ?? [];
-  const modelOptions = config.models
-    ? [
-        ...advertised,
-        ...KNOWN_MODELS.filter(
+  const configOption = (category: string) =>
+    config.configOptions?.find((o) => o.category === category);
+  const configValues = (o?: SessionConfigOption) =>
+    o?.options.flatMap((v) => ("options" in v ? v.options : [v])) ?? [];
+  const modeDescription = (id: string, description?: string | null) =>
+    description ??
+    {
+      ":read-only":
+        "Codex can read files in the current workspace. Approval is required to edit files or access the internet.",
+      "read-only":
+        "Codex can read files in the current workspace. Approval is required to edit files or access the internet.",
+      ":workspace":
+        "Codex can read and edit files in the current workspace, and run commands. Approval is required to access the internet or edit other files.",
+      workspace:
+        "Codex can read and edit files in the current workspace, and run commands. Approval is required to access the internet or edit other files.",
+      ":danger-full-access":
+        "Codex can edit files outside this workspace and access the internet without asking for approval. Exercise caution when using.",
+      "danger-full-access":
+        "Codex can edit files outside this workspace and access the internet without asking for approval. Exercise caution when using.",
+    }[id];
+  const modeConfig = configOption("mode");
+  const modelConfig = configOption("model");
+  const effortConfig = configOption("thought_level");
+  const modelOptions = modelConfig
+    ? configValues(modelConfig).map((m) => ({
+        value: m.value,
+        label: m.name,
+        description: m.description,
+      }))
+    : config.models
+      ? [
+          ...advertised,
+          ...KNOWN_MODELS.filter(
           (k) => !advertised.some((m) => m.modelId === k.modelId),
         ),
-      ].map((m) => ({ value: m.modelId, label: m.name }))
-    : null;
+        ].map((m) => ({ value: m.modelId, label: m.name }))
+      : null;
 
   return (
     <div className="chat-pane">
@@ -674,6 +795,16 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                   label: displayName(name),
                 }))}
                 onChange={switchAgent}
+              />
+            )}
+            {agent.startsWith("claude") && history.length > 0 && (
+              <Dropdown
+                title="Resume session"
+                value="history"
+                options={historyOptions}
+                onChange={(id) => {
+                  restartSession(id === "__new" ? undefined : id);
+                }}
               />
             )}
           </span>
@@ -934,7 +1065,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           }}
           placeholder={
             status === "ready"
-              ? "message claude code — enter to send"
+              ? `message ${displayName(agent).toLowerCase()} — enter to send`
               : status === "busy"
                 ? "working — enter queues for the next turn"
                 : statusText[status]
@@ -998,37 +1129,72 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           }}
         />
         <div className="chat-input-meta">
-          {config.modes && (
+          {(modeConfig || config.modes) && (
             <Dropdown
               up
-              title="Permission mode"
+              title={
+                modeConfig?.description ??
+                config.modes?.availableModes.find((m) => m.id === config.modes?.currentModeId)
+                  ?.description ??
+                "Permission mode"
+              }
               disabled={status === "dead"}
-              value={config.modes.currentModeId}
-              options={config.modes.availableModes.map((m) => ({
-                value: m.id,
-                label: m.name,
-              }))}
-              onChange={setMode}
+              value={modeConfig?.currentValue ?? config.modes!.currentModeId}
+              options={
+                modeConfig
+                  ? configValues(modeConfig).map((m) => ({
+                      value: m.value,
+                      label: m.name,
+                      description: modeDescription(m.value, m.description),
+                    }))
+                  : config.modes!.availableModes.map((m) => ({
+                      value: m.id,
+                      label: m.name,
+                      description: modeDescription(m.id, m.description),
+                    }))
+              }
+              onChange={(value) =>
+                modeConfig ? setConfigOption(modeConfig.id, value) : setMode(value)
+              }
             />
           )}
           {modelOptions && (
             <Dropdown
               up
-              title="Model"
+              title={modelConfig?.description ?? "Model"}
               disabled={status === "dead"}
-              value={config.models!.currentModelId}
+              value={modelConfig?.currentValue ?? config.models!.currentModelId}
               options={modelOptions}
-              onChange={setModel}
+              onChange={(value) =>
+                modelConfig ? setConfigOption(modelConfig.id, value) : setModel(value)
+              }
             />
           )}
-          {agent.startsWith("claude") && (
+          {(effortConfig || agent.startsWith("claude")) && (
             <Dropdown
               up
-              title="Effort — changing restarts the session"
+              title={
+                effortConfig?.description ??
+                (agent.startsWith("claude")
+                  ? "Effort — changing restarts the session"
+                  : "Reasoning effort")
+              }
               disabled={status === "dead"}
-              value={effort}
-              options={EFFORTS}
-              onChange={changeEffort}
+              value={effortConfig?.currentValue ?? effort}
+              options={
+                effortConfig
+                  ? configValues(effortConfig).map((e) => ({
+                      value: e.value,
+                      label: e.name,
+                      description: e.description,
+                    }))
+                  : EFFORTS
+              }
+              onChange={(value) =>
+                effortConfig
+                  ? setConfigOption(effortConfig.id, value)
+                  : changeEffort(value)
+              }
             />
           )}
           <span

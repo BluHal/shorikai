@@ -14,9 +14,12 @@ const update = (update) =>
   });
 const chunk = (text) =>
   update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+const user = (text) =>
+  update({ sessionUpdate: "user_message_chunk", content: { type: "text", text } });
 
 const PERMISSION_RPC_ID = 9001;
 let pendingPromptId = null;
+let fakeModel = "gpt-5.3-codex";
 
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", (line) => {
@@ -62,6 +65,55 @@ rl.on("line", (line) => {
               { modelId: "opus", name: "Opus" },
             ],
           },
+          configOptions: [
+            {
+              type: "select",
+              id: "model",
+              name: "Model",
+              category: "model",
+              currentValue: fakeModel,
+              options: [
+                { value: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
+                { value: "gpt-5.2", name: "GPT-5.2" },
+              ],
+            },
+            {
+              type: "select",
+              id: "reasoning_effort",
+              name: "Reasoning Effort",
+              category: "thought_level",
+              currentValue: "medium",
+              options: [
+                { value: "low", name: "Low" },
+                { value: "medium", name: "Medium" },
+                { value: "high", name: "High" },
+              ],
+            },
+          ],
+        },
+      });
+      break;
+    case "session/load":
+      user("old question");
+      chunk("old answer");
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: {
+          modes: {
+            currentModeId: "default",
+            availableModes: [
+              { id: "default", name: "Always Ask" },
+              { id: "acceptEdits", name: "Accept Edits" },
+            ],
+          },
+          models: {
+            currentModelId: "sonnet",
+            availableModels: [
+              { modelId: "sonnet", name: "Sonnet" },
+              { modelId: "opus", name: "Opus" },
+            ],
+          },
         },
       });
       break;
@@ -71,6 +123,26 @@ rl.on("line", (line) => {
       break;
     case "session/set_model":
       send({ jsonrpc: "2.0", id: msg.id, result: null });
+      break;
+    case "session/set_config_option":
+      fakeModel = msg.params.value;
+      send({ jsonrpc: "2.0", id: msg.id, result: null });
+      update({
+        sessionUpdate: "config_option_update",
+        configOptions: [
+          {
+            type: "select",
+            id: msg.params.configId,
+            name: "Model",
+            category: "model",
+            currentValue: fakeModel,
+            options: [
+              { value: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
+              { value: "gpt-5.2", name: "GPT-5.2" },
+            ],
+          },
+        ],
+      });
       break;
     case "session/prompt": {
       const imgs = msg.params.prompt.filter((b) => b.type === "image");

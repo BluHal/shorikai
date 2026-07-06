@@ -10,7 +10,9 @@ use acp_bridge::{AcpBridge, AcpEvent};
 use dap_core::DapCore;
 use lsp_host::LspHost;
 use pty_host::{PtyEvent, PtyHost};
+use serde::Serialize;
 use serde_json::Value;
+use std::io::BufRead;
 use tauri::{Emitter, Manager, State};
 use workspace_index::WorkspaceIndex;
 
@@ -75,12 +77,13 @@ fn acp_start(
     agent: String,
     cwd: String,
     effort: Option<String>,
+    resume: Option<String>,
 ) -> Result<u32, String> {
-    eprintln!("[acp] start requested: agent={agent} cwd={cwd} effort={effort:?}");
+    eprintln!("[acp] start requested: agent={agent} cwd={cwd} effort={effort:?} resume={resume:?}");
     let config = acp_bridge::load_agent_config(&agent)?;
     // claude-code adapter forwards _meta.claudeCode.options into the SDK
     let meta = effort.map(|e| serde_json::json!({ "claudeCode": { "options": { "effort": e } } }));
-    let started = bridge.start(&config, &cwd, meta);
+    let started = bridge.start(&config, &cwd, meta, resume);
     eprintln!("[acp] start result: {started:?}");
     started
 }
@@ -116,6 +119,16 @@ fn acp_set_model(bridge: State<AcpBridge>, id: u32, model_id: String) -> Result<
 }
 
 #[tauri::command]
+fn acp_set_config_option(
+    bridge: State<AcpBridge>,
+    id: u32,
+    config_id: String,
+    value: String,
+) -> Result<(), String> {
+    bridge.set_config_option(id, &config_id, &value)
+}
+
+#[tauri::command]
 fn acp_cancel(bridge: State<AcpBridge>, id: u32) -> Result<(), String> {
     bridge.cancel(id)
 }
@@ -136,7 +149,12 @@ fn acp_reset(bridge: State<AcpBridge>) {
 #[tauri::command]
 fn plan_usage() -> Result<Value, String> {
     let creds = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ])
         .output()
         .map_err(|e| e.to_string())?;
     if !creds.status.success() {
@@ -174,26 +192,111 @@ fn claude_context_usage(cwd: String, session_id: String) -> Result<Value, String
     if session_id.contains('/') || session_id.contains("..") {
         return Err("invalid session id".into());
     }
-    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let slug: String = cwd
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let path = format!("{home}/.claude/projects/{slug}/{session_id}.jsonl");
+    let path = claude_project_dir(&cwd)?.join(format!("{session_id}.jsonl"));
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     // ponytail: whole-file read + reverse scan; tail-seek if transcripts get huge
     for line in text.lines().rev() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
-        let Some(usage) = entry.pointer("/message/usage") else { continue };
-        let tokens: u64 = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
-            .iter()
-            .map(|k| usage.get(*k).and_then(|v| v.as_u64()).unwrap_or(0))
-            .sum();
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(usage) = entry.pointer("/message/usage") else {
+            continue;
+        };
+        let tokens: u64 = [
+            "input_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        ]
+        .iter()
+        .map(|k| usage.get(*k).and_then(|v| v.as_u64()).unwrap_or(0))
+        .sum();
         if tokens > 0 {
             return Ok(serde_json::json!({ "context_tokens": tokens }));
         }
     }
     Ok(serde_json::json!({ "context_tokens": 0 }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeSession {
+    session_id: String,
+    title: String,
+    updated_at: u64,
+}
+
+fn claude_project_dir(cwd: &str) -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let slug: String = cwd
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    Ok(std::path::Path::new(&home)
+        .join(".claude/projects")
+        .join(slug))
+}
+
+fn first_user_line(path: &std::path::Path) -> String {
+    let Ok(file) = std::fs::File::open(path) else {
+        return "Untitled session".into();
+    };
+    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+            continue;
+        }
+        let content = &v["message"]["content"];
+        let text = content.as_str().map(str::to_owned).or_else(|| {
+            content.as_array().map(|items| {
+                items
+                    .iter()
+                    .filter_map(|i| i.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+        });
+        if let Some(s) = text.map(|s| s.trim().replace('\n', " ")) {
+            if !s.is_empty() {
+                return s.chars().take(80).collect();
+            }
+        }
+    }
+    "Untitled session".into()
+}
+
+#[tauri::command]
+fn claude_session_history(cwd: String) -> Result<Vec<ClaudeSession>, String> {
+    let dir = claude_project_dir(&cwd)?;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(Vec::new());
+    };
+    let mut sessions = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(session_id) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        let updated_at = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        sessions.push(ClaudeSession {
+            session_id,
+            title: first_user_line(&path),
+            updated_at,
+        });
+    }
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+    sessions.truncate(50);
+    Ok(sessions)
 }
 
 #[tauri::command]
@@ -415,11 +518,9 @@ async fn dap_evaluate(
     frame_id: Option<i64>,
 ) -> Result<Value, String> {
     let core = std::sync::Arc::clone(&core);
-    tauri::async_runtime::spawn_blocking(move || {
-        core.evaluate(session_id, &expression, frame_id)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || core.evaluate(session_id, &expression, frame_id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -509,11 +610,13 @@ pub fn run() {
             acp_permission_response,
             acp_set_mode,
             acp_set_model,
+            acp_set_config_option,
             acp_cancel,
             acp_kill,
             acp_reset,
             plan_usage,
             claude_context_usage,
+            claude_session_history,
             ws_watch,
             ws_unwatch,
             session_load,

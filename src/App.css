@@ -1439,6 +1439,15 @@
   white-space: nowrap;
 }
 
+.chat-header .chat-dd-menu {
+  max-width: min(620px, calc(100vw - 48px));
+}
+
+.chat-header .chat-dd-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-dd-item:hover {
   background: var(--surface-3);
   color: var(--text-1);
