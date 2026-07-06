@@ -13,6 +13,7 @@ Built with **Tauri 2 + Rust + React**.
 - **Integrated Terminal** — Full PTY-backed terminal emulator (xterm.js + WebGL)
 - **Code Editor** — Monaco editor with Language Server Protocol support (TypeScript, Go, Angular, and more)
 - **AI Agent Chat** — Stream conversations with coding agents via the Agent Communication Protocol (ACP)
+- **Claude Code + Codex Providers** — Switch agents from the chat pane; provider choice is remembered per project
 - **Multi-Agent Crew** — Run and monitor multiple sub-agents with live status tracking
 - **Multi-Project Workspaces** — Tab-based project switching with session persistence
 - **Git Integration** — Stage, unstage, commit, and view diffs without leaving the cockpit
@@ -36,6 +37,26 @@ npm install
 # Run in development mode (Vite + Tauri)
 npm run dev
 ```
+
+## AI Agents
+
+Open the AI chat pane and choose **Claude Code** or **Codex** from the provider control. Shorikai creates default ACP agent entries in `~/.config/shorikai/agents.json` and merges any missing defaults on startup, so custom edits in that file are preserved.
+
+Codex runs with a Shorikai-scoped `CODEX_HOME`, which keeps global Codex MCP server settings from breaking the embedded chat session while still reusing your Codex auth files.
+
+## Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+T` | New terminal, or new AI chat tab when AI chat is focused |
+| `Cmd+Shift+A` | Open/focus AI chat |
+| `Cmd+Shift+J` | Open/focus terminal |
+| `Cmd+J` | Toggle terminal panel |
+| `Cmd+P` | Fuzzy file search |
+| `Cmd+Shift+F` | Content search |
+| `Cmd+\` | Collapse/restore editor dock |
+
+The same AI chat and terminal commands are also available from the native **View** menu.
 
 ## Building
 

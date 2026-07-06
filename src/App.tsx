@@ -1,10 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { DockviewApi } from "dockview-react";
 import { Titlebar } from "./chrome/Titlebar";
 import { StatusBar } from "./chrome/StatusBar";
 import { SearchOverlay } from "./chrome/SearchOverlay";
-import { Workspace, addTerminal, isEditorish } from "./Workspace";
+import { Workspace, addChat, addTerminal, isChatId, isEditorish } from "./Workspace";
 import { bus } from "./bus";
 import { startGitStore } from "./gitStore";
 import {
@@ -30,6 +31,8 @@ import "./App.css";
 // panes call the bus; it always routes to the active workspace
 bus.openFile = (path, line) => activeWorkspace()?.openFile(path, line);
 bus.openDiff = (path, o, n) => activeWorkspace()?.openDiff(path, o, n);
+bus.openChat = () => activeWorkspace()?.openChat();
+bus.openTerminal = () => activeWorkspace()?.openTerminal();
 bus.collapseEditor = () => activeWorkspace()?.collapseEditor();
 bus.toggleTerminal = () => activeWorkspace()?.toggleTerminal();
 bus.startDebugTerminal = () => startDebugTerminal();
@@ -87,6 +90,12 @@ function focusSplit(api: DockviewApi, dir: "left" | "right" | "up" | "down") {
   api.adjacentGroupInDirection(api.activeGroup, dir)?.focus();
 }
 
+function runAppCommand(id: string) {
+  if (id === "open-chat") bus.openChat();
+  else if (id === "open-terminal") bus.openTerminal();
+  else if (id === "toggle-terminal") bus.toggleTerminal();
+}
+
 // ghostty-style bindings, by physical key (e.code) so they survive non-US layouts
 function handleKey(e: KeyboardEvent): (() => void) | null {
   const ws = activeWorkspace();
@@ -97,7 +106,9 @@ function handleKey(e: KeyboardEvent): (() => void) | null {
 
   if (cmd && !shift && !alt && !ctrl) {
     if (key === "KeyP") return () => bus.openSearch("files");
-    if (key === "KeyT") return () => addTerminal(api);
+    if (key === "KeyT")
+      return () =>
+        isChatId(api.activePanel?.id ?? "") ? addChat(api) : addTerminal(api);
     if (key === "KeyD") return () => addTerminal(api, "right");
     if (key === "KeyJ") return () => ws.toggleTerminal();
     if (key === "Backslash") return () => ws.toggleEditor();
@@ -116,6 +127,8 @@ function handleKey(e: KeyboardEvent): (() => void) | null {
     if (key === "BracketLeft") return () => cycleGroup(api, -1);
   }
   if (cmd && shift && !alt && !ctrl) {
+    if (key === "KeyA") return () => runAppCommand("open-chat");
+    if (key === "KeyJ") return () => runAppCommand("open-terminal");
     if (key === "KeyF") return () => bus.openSearch("content");
     if (key === "KeyD") return () => addTerminal(api, "below");
     if (key === "BracketRight") return () => cycleTab(api, 1);
@@ -153,6 +166,12 @@ function App() {
       startGitStore();
       wireDebug();
     })();
+    let unlistenMenu: (() => void) | undefined;
+    listen<string>("app:menu", (event) => runAppCommand(event.payload)).then(
+      (unlisten) => {
+        unlistenMenu = unlisten;
+      },
+    );
     const onKeyDown = (e: KeyboardEvent) => {
       const dbg = getDebug();
       if (e.code === "F5" && dbg.paused) {
@@ -180,7 +199,10 @@ function App() {
     };
     // capture phase: beat xterm to the keystroke
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      unlistenMenu?.();
+    };
   }, []);
 
   return (

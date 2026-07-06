@@ -95,6 +95,8 @@ pub struct AgentConfig {
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 fn default_agents() -> Value {
@@ -192,6 +194,7 @@ impl AcpBridge {
         let mut child = Command::new(&config.command)
             .args(&config.args)
             .current_dir(cwd)
+            .envs(&config.env)
             // shed any enclosing Claude Code session (e.g. when Shorikai is
             // launched from a Claude Code dev loop), or the agent refuses to run
             .env_remove("CLAUDECODE")
@@ -688,6 +691,7 @@ mod tests {
                 "{}/tests/fake_acp_agent.mjs",
                 env!("CARGO_MANIFEST_DIR")
             )],
+            env: HashMap::new(),
         }
     }
 
@@ -1059,6 +1063,7 @@ mod tests {
                     env!("CARGO_MANIFEST_DIR")
                 ),
             ],
+            env: HashMap::new(),
         };
         let id = bridge.start(&wrapper, "/tmp", None, None).unwrap();
         match rx.recv_timeout(Duration::from_secs(10)).unwrap() {

@@ -6,13 +6,14 @@ mod pty_host;
 mod session_state;
 mod workspace_index;
 
-use acp_bridge::{AcpBridge, AcpEvent};
+use acp_bridge::{AcpBridge, AcpEvent, AgentConfig};
 use dap_core::DapCore;
 use lsp_host::LspHost;
 use pty_host::{PtyEvent, PtyHost};
 use serde::Serialize;
 use serde_json::Value;
 use std::io::BufRead;
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::{Emitter, Manager, State};
 use workspace_index::WorkspaceIndex;
 
@@ -71,6 +72,43 @@ fn acp_agents() -> Result<Value, String> {
     acp_bridge::load_agents()
 }
 
+fn strip_mcp_servers_from_toml(raw: &str) -> String {
+    let mut out = Vec::new();
+    let mut skipping = false;
+    for line in raw.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            skipping = t.starts_with("[mcp_servers") || t.starts_with("[[mcp_servers");
+        }
+        if !skipping {
+            out.push(line);
+        }
+    }
+    out.join("\n") + "\n"
+}
+
+fn prepare_codex_home_for_shorikai(config: &mut AgentConfig) -> Result<(), String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let src = std::path::Path::new(&home).join(".codex");
+    let dst = std::path::Path::new(&home).join(".config/shorikai/codex-home");
+    std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
+
+    if let Ok(raw) = std::fs::read_to_string(src.join("config.toml")) {
+        std::fs::write(dst.join("config.toml"), strip_mcp_servers_from_toml(&raw))
+            .map_err(|e| e.to_string())?;
+    }
+    for name in ["auth.json", "installation_id", "models_cache.json"] {
+        let from = src.join(name);
+        if from.exists() {
+            std::fs::copy(&from, dst.join(name)).map_err(|e| e.to_string())?;
+        }
+    }
+    config
+        .env
+        .insert("CODEX_HOME".into(), dst.to_string_lossy().into_owned());
+    Ok(())
+}
+
 #[tauri::command]
 fn acp_start(
     bridge: State<AcpBridge>,
@@ -79,13 +117,13 @@ fn acp_start(
     effort: Option<String>,
     resume: Option<String>,
 ) -> Result<u32, String> {
-    eprintln!("[acp] start requested: agent={agent} cwd={cwd} effort={effort:?} resume={resume:?}");
-    let config = acp_bridge::load_agent_config(&agent)?;
+    let mut config = acp_bridge::load_agent_config(&agent)?;
+    if agent == "codex" && !config.env.contains_key("CODEX_HOME") {
+        prepare_codex_home_for_shorikai(&mut config)?;
+    }
     // claude-code adapter forwards _meta.claudeCode.options into the SDK
     let meta = effort.map(|e| serde_json::json!({ "claudeCode": { "options": { "effort": e } } }));
-    let started = bridge.start(&config, &cwd, meta, resume);
-    eprintln!("[acp] start result: {started:?}");
-    started
+    bridge.start(&config, &cwd, meta, resume)
 }
 
 #[tauri::command]
@@ -569,6 +607,42 @@ fn git_diff(root: String, path: String) -> Result<git_status::DiffTexts, String>
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .menu(|app| {
+            let open_chat = MenuItem::with_id(
+                app,
+                "open-chat",
+                "Open AI Chat",
+                true,
+                Some("CmdOrCtrl+Shift+A"),
+            )?;
+            let open_terminal = MenuItem::with_id(
+                app,
+                "open-terminal",
+                "Open Terminal",
+                true,
+                Some("CmdOrCtrl+Shift+J"),
+            )?;
+            let toggle_terminal = MenuItem::with_id(
+                app,
+                "toggle-terminal",
+                "Toggle Terminal",
+                true,
+                Some("CmdOrCtrl+J"),
+            )?;
+            let view = Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&open_chat, &open_terminal, &toggle_terminal],
+            )?;
+            Menu::with_items(app, &[&view])
+        })
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            if matches!(id, "open-chat" | "open-terminal" | "toggle-terminal") {
+                let _ = app.emit("app:menu", id);
+            }
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             app.manage(PtyHost::new(move |event| {
@@ -660,4 +734,30 @@ pub fn run() {
                 app.state::<std::sync::Arc<DapCore>>().stop_all();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_home_config_strips_mcp_servers_only() {
+        let raw = r#"
+model = "gpt-5.5"
+
+[mcp_servers.notion]
+url = "https://mcp.notion.com/mcp"
+
+[mcp_servers.notion.env]
+TOKEN = "secret"
+
+[shell_environment_policy]
+inherit = "core"
+"#;
+        let cleaned = strip_mcp_servers_from_toml(raw);
+        assert!(cleaned.contains("model = \"gpt-5.5\""));
+        assert!(cleaned.contains("[shell_environment_policy]"));
+        assert!(!cleaned.contains("mcp_servers"));
+        assert!(!cleaned.contains("secret"));
+    }
 }

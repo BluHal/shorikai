@@ -36,6 +36,7 @@ const components = {
 
 export const isEditorish = (id: string) =>
   id.startsWith("editor:") || id.startsWith("diff:") || id.startsWith("preview:");
+export const isChatId = (id: string) => id === "chat" || id.startsWith("chat-");
 const isTerminalId = (id: string) => id.startsWith("terminal-");
 // the bottom panel group: terminals plus the debug pane
 const isBottomId = (id: string) => isTerminalId(id) || id === "debug";
@@ -94,6 +95,20 @@ type RailFile = {
 };
 
 let termSeq = 0;
+let chatSeq = 1;
+
+export function addChat(api: DockviewApi) {
+  const active = api.activePanel;
+  const chat = active && isChatId(active.id)
+    ? active
+    : api.panels.find((p) => isChatId(p.id));
+  api.addPanel({
+    id: `chat-${++chatSeq}`,
+    component: "chat",
+    title: "AI Chat",
+    position: chat ? { referencePanel: chat, direction: "within" } : undefined,
+  }).api.setActive();
+}
 
 export function addTerminal(api: DockviewApi, direction?: "right" | "below") {
   const group = api.activeGroup;
@@ -196,13 +211,42 @@ export function Workspace(props: { root: string; visible: boolean }) {
   // terminal groups shrink to their 30px tab bar instead of closing: the
   // PTYs (and anything running in them) stay alive
   const termHeights = useRef(new Map<string, number>());
+  const openChat = () => {
+    const api = apiRef.current;
+    if (!api) return;
+    const existing = api.panels.find((p) => isChatId(p.id));
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    addChat(api);
+  };
+
+  const openTerminal = () => {
+    const api = apiRef.current;
+    if (!api) return;
+    const existing = api.panels.find((p) => isTerminalId(p.id));
+    if (!existing) {
+      addTerminal(api, "below");
+      return;
+    }
+    existing.api.setActive();
+    const group = api.groups.find((g) => g.panels.some((p) => p.id === existing.id));
+    if (group && group.height <= 40) {
+      group.api.setSize({ height: termHeights.current.get(group.id) ?? 240 });
+    }
+  };
+
   const toggleTerminal = () => {
     const api = apiRef.current;
     if (!api) return;
     const groups = api.groups.filter(
       (g) => g.panels.length > 0 && g.panels.every((p) => isBottomId(p.id)),
     );
-    if (groups.length === 0) return;
+    if (groups.length === 0) {
+      addTerminal(api, "below");
+      return;
+    }
     const collapsed = groups.every((g) => g.height <= 40);
     for (const g of groups) {
       if (collapsed) {
@@ -371,6 +415,8 @@ export function Workspace(props: { root: string; visible: boolean }) {
       api: event.api,
       openFile,
       openDiff,
+      openChat,
+      openTerminal,
       collapseEditor: collapseEditors,
       toggleEditor,
       toggleTerminal,
@@ -389,6 +435,8 @@ export function Workspace(props: { root: string; visible: boolean }) {
         for (const p of event.api.panels) {
           const m = /^terminal-(\d+)$/.exec(p.id);
           if (m) termSeq = Math.max(termSeq, Number(m[1]));
+          const c = /^chat-(\d+)$/.exec(p.id);
+          if (c) chatSeq = Math.max(chatSeq, Number(c[1]));
         }
       } catch {
         restored = false;

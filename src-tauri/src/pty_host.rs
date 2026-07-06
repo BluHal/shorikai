@@ -78,7 +78,10 @@ impl PtyHost {
             builder.cwd(dir);
         }
 
-        let child = pty.slave.spawn_command(builder).map_err(|e| e.to_string())?;
+        let child = pty
+            .slave
+            .spawn_command(builder)
+            .map_err(|e| e.to_string())?;
         let child_pid = child.process_id();
         drop(pty.slave);
         let reader = pty.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -103,7 +106,9 @@ impl PtyHost {
     pub fn write(&self, id: u32, data: &str) -> Result<(), String> {
         let mut sessions = self.sessions.lock().unwrap();
         let s = sessions.get_mut(&id).ok_or("no such pty session")?;
-        s.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())
+        s.writer
+            .write_all(data.as_bytes())
+            .map_err(|e| e.to_string())
     }
 
     pub fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
@@ -156,7 +161,9 @@ fn read_loop(
             Err(e) => e.valid_up_to(),
         };
         if valid_len > 0 {
-            let data = std::str::from_utf8(&pending[..valid_len]).unwrap().to_owned();
+            let data = std::str::from_utf8(&pending[..valid_len])
+                .unwrap()
+                .to_owned();
             on_event(PtyEvent::Data { id, data });
             pending.drain(..valid_len);
         }
@@ -219,8 +226,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(2);
             let mut acc = String::new();
             while Instant::now() < deadline && !acc.contains("40 100") {
-                if let Ok(PtyEvent::Data { data, .. }) =
-                    rx.recv_timeout(Duration::from_millis(200))
+                if let Ok(PtyEvent::Data { data, .. }) = rx.recv_timeout(Duration::from_millis(200))
                 {
                     acc.push_str(&data);
                 }

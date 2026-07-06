@@ -3,6 +3,8 @@
 export const bus = {
   openFile: (_path: string, _line?: number) => {},
   openDiff: (_path: string, _oldText: string, _newText: string) => {},
+  openChat: () => {},
+  openTerminal: () => {},
   collapseEditor: () => {},
   toggleTerminal: () => {},
   openSearch: (_mode: "files" | "content") => {},

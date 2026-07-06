@@ -75,9 +75,27 @@ pub fn which(command: &str) -> bool {
 /// One-click install: shells out to the package manager the config names.
 pub fn install(tool: &str, packages: &[String]) -> Result<String, String> {
     let (cmd, args): (&str, Vec<&str>) = match tool {
-        "npm" => ("npm", ["install", "-g"].into_iter().chain(packages.iter().map(String::as_str)).collect()),
-        "go" => ("go", ["install"].into_iter().chain(packages.iter().map(String::as_str)).collect()),
-        "brew" => ("brew", ["install"].into_iter().chain(packages.iter().map(String::as_str)).collect()),
+        "npm" => (
+            "npm",
+            ["install", "-g"]
+                .into_iter()
+                .chain(packages.iter().map(String::as_str))
+                .collect(),
+        ),
+        "go" => (
+            "go",
+            ["install"]
+                .into_iter()
+                .chain(packages.iter().map(String::as_str))
+                .collect(),
+        ),
+        "brew" => (
+            "brew",
+            ["install"]
+                .into_iter()
+                .chain(packages.iter().map(String::as_str))
+                .collect(),
+        ),
         other => return Err(format!("unknown install tool {other:?}")),
     };
     let out = Command::new(cmd)
@@ -139,7 +157,10 @@ impl LspHost {
         let stdout = child.stdout.take().unwrap();
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.servers.lock().unwrap().insert(id, Server { child, stdin });
+        self.servers
+            .lock()
+            .unwrap()
+            .insert(id, Server { child, stdin });
 
         let servers = Arc::clone(&self.servers);
         let on_event = Arc::clone(&self.on_event);
@@ -201,10 +222,7 @@ pub fn read_frame(reader: &mut impl BufRead) -> std::io::Result<Option<Value>> {
         if line.is_empty() {
             break; // end of headers
         }
-        if let Some(v) = line
-            .to_ascii_lowercase()
-            .strip_prefix("content-length:")
-        {
+        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
             content_length = v.trim().parse().ok();
         }
     }

@@ -39,6 +39,8 @@ export type WorkspaceHandlers = {
   api: DockviewApi;
   openFile: (path: string, line?: number) => void;
   openDiff: (path: string, oldText: string, newText: string) => void;
+  openChat: () => void;
+  openTerminal: () => void;
   collapseEditor: () => void;
   toggleEditor: () => void;
   toggleTerminal: () => void;

@@ -35,10 +35,20 @@ pub enum DapEvent {
         path: Option<String>,
         line: Option<u32>,
     },
-    Continued { session_id: u32 },
-    Output { session_id: u32, category: String, text: String },
-    SessionEnded { session_id: u32 },
-    Error { message: String },
+    Continued {
+        session_id: u32,
+    },
+    Output {
+        session_id: u32,
+        category: String,
+        text: String,
+    },
+    SessionEnded {
+        session_id: u32,
+    },
+    Error {
+        message: String,
+    },
 }
 
 struct Session {
@@ -213,7 +223,10 @@ impl DapCore {
             pending: Mutex::new(HashMap::new()),
         });
         let id = self.next_session.fetch_add(1, Ordering::Relaxed);
-        self.sessions.lock().unwrap().insert(id, Arc::clone(&session));
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(id, Arc::clone(&session));
 
         let ctx = ReaderCtx {
             session_id: id,
@@ -448,7 +461,10 @@ fn js_debug_entrypoint() -> Result<std::path::PathBuf, String> {
     );
     let status = Command::new("sh")
         .arg("-c")
-        .arg(format!("curl -fsSL '{url}' | tar xz -C '{}'", dir.display()))
+        .arg(format!(
+            "curl -fsSL '{url}' | tar xz -C '{}'",
+            dir.display()
+        ))
         .status()
         .map_err(|e| e.to_string())?;
     if !status.success() {
@@ -750,7 +766,11 @@ mod tests {
 
         core.set_breakpoints("/tmp/fake/app.js", vec![7]);
         let sid = core
-            .start_session(port, "launch", json!({ "type": "fake", "request": "launch" }))
+            .start_session(
+                port,
+                "launch",
+                json!({ "type": "fake", "request": "launch" }),
+            )
             .unwrap();
 
         // fake adapter stops at the breakpoint only after it saw
@@ -778,7 +798,10 @@ mod tests {
         core.continue_(sid, thread_id).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match rx.recv_timeout(deadline - Instant::now()).expect("no continue") {
+            match rx
+                .recv_timeout(deadline - Instant::now())
+                .expect("no continue")
+            {
                 DapEvent::Continued { session_id } => {
                     assert_eq!(session_id, sid);
                     break;
@@ -838,7 +861,10 @@ mod tests {
         core.step(sid, thread, "next").unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match rx.recv_timeout(deadline - Instant::now()).expect("no continued") {
+            match rx
+                .recv_timeout(deadline - Instant::now())
+                .expect("no continued")
+            {
                 DapEvent::Continued { .. } => break,
                 _ => {}
             }
@@ -878,8 +904,16 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(90);
         let thread = loop {
             match rx.recv_timeout(deadline - Instant::now()).expect("no stop") {
-                DapEvent::Stopped { thread_id, path, line, .. } => {
-                    assert!(path.as_deref().unwrap_or("").ends_with("main.go"), "{path:?}");
+                DapEvent::Stopped {
+                    thread_id,
+                    path,
+                    line,
+                    ..
+                } => {
+                    assert!(
+                        path.as_deref().unwrap_or("").ends_with("main.go"),
+                        "{path:?}"
+                    );
                     assert_eq!(line, Some(7));
                     break thread_id;
                 }
@@ -914,7 +948,10 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(saw_output, "program stdout should stream through as output events");
+        assert!(
+            saw_output,
+            "program stdout should stream through as output events"
+        );
         core.stop_all();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -935,7 +972,10 @@ mod tests {
         adapter.kill().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match rx.recv_timeout(deadline - Instant::now()).expect("no session end") {
+            match rx
+                .recv_timeout(deadline - Instant::now())
+                .expect("no session end")
+            {
                 DapEvent::SessionEnded { session_id } => {
                     assert_eq!(session_id, sid);
                     break;

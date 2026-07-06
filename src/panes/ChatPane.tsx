@@ -168,6 +168,8 @@ const displayName = (key: string) =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 
+const agentStorageKey = (root: string) => `shorikai.agent:${root}`;
+
 // current Claude lineup with exact ids; the adapter only advertises a couple
 // of aliases, so these are merged into whatever it reports
 const KNOWN_MODELS = [
@@ -261,7 +263,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const [input, setInput] = useState("");
   const [subs, setSubs] = useState<SubAgent[]>([]);
   const [drill, setDrill] = useState<string | null>(null);
-  const [agent, setAgent] = useState("claude-code");
+  const [agent, setAgent] = useState(
+    () => localStorage.getItem(agentStorageKey(root)) ?? "claude-code",
+  );
   const [agents, setAgents] = useState<Record<string, AgentConfig>>({});
   const [history, setHistory] = useState<ClaudeSession[]>([]);
   const [config, setConfig] = useState<ConfigState>({});
@@ -355,6 +359,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     if (oldId != null) invoke("acp_kill", { id: oldId }).catch(() => {});
     agentIdRef.current = null;
     setAgent(name);
+    localStorage.setItem(agentStorageKey(root), name);
     props.api?.setTitle(displayName(name));
     setRows([{ kind: "system", text: `switched to ${displayName(name)}` }]);
     start(name);
@@ -540,6 +545,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     invoke<Record<string, AgentConfig>>("acp_agents")
       .then(setAgents)
       .catch(() => {});
+    props.api?.setTitle(displayName(agentRef.current));
     refreshHistory();
     trackGitRoot(root);
     start();

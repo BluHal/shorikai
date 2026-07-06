@@ -115,7 +115,11 @@ impl WorkspaceIndex {
             })
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
-        Ok(scored.into_iter().take(50).map(|(_, f)| f.clone()).collect())
+        Ok(scored
+            .into_iter()
+            .take(50)
+            .map(|(_, f)| f.clone())
+            .collect())
     }
 
     fn files(&self, root: &str) -> Result<Arc<Vec<String>>, String> {
@@ -279,7 +283,11 @@ mod tests {
         let dir = fixture();
         let root = list_dir(&dir).unwrap();
         let names: Vec<&str> = root.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["src", "README.md"], "dirs first, ignores applied");
+        assert_eq!(
+            names,
+            vec!["src", "README.md"],
+            "dirs first, ignores applied"
+        );
         assert!(root[0].is_dir);
 
         let src = list_dir(&dir.join("src")).unwrap();
@@ -354,7 +362,10 @@ mod tests {
                 Err(e) => panic!("watcher never reported: {e}"),
             };
             // macOS tempdirs may come back with /private prefixed
-            if dirs.iter().any(|d| d.ends_with(src.trim_start_matches("/private"))) {
+            if dirs
+                .iter()
+                .any(|d| d.ends_with(src.trim_start_matches("/private")))
+            {
                 break;
             }
         }

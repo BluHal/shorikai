@@ -127,9 +127,7 @@ pub fn diff_texts(root: &str, path: &str) -> Result<DiffTexts, String> {
     let file = std::path::Path::new(root).join(path);
     let new_text = match std::fs::read(&file) {
         Err(_) => String::new(),
-        Ok(bytes) if bytes.len() > 10 * 1024 * 1024 => {
-            return Err("file too large to diff".into())
-        }
+        Ok(bytes) if bytes.len() > 10 * 1024 * 1024 => return Err("file too large to diff".into()),
         Ok(bytes) if bytes.contains(&0) => return Err("binary file".into()),
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
     };
