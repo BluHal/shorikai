@@ -741,6 +741,26 @@ mod tests {
     }
 
     #[test]
+    fn plan_updates_pass_through() {
+        let (bridge, rx, id) = start_ready();
+        bridge.prompt(id, "plan").unwrap();
+        let (text, others) = drain_turn(&rx);
+        assert_eq!(text, "done");
+        let plans: Vec<&Value> = others
+            .iter()
+            .filter_map(|e| match e {
+                AcpEvent::Plan { update, .. } => Some(update),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(plans.len(), 2, "expected 2 plan updates: {others:?}");
+        assert_eq!(plans[0]["entries"][0]["status"], "in_progress");
+        assert_eq!(plans[1]["entries"][0]["status"], "completed");
+        assert_eq!(plans[1]["entries"][1]["content"], "Write the fix");
+        bridge.kill(id).unwrap();
+    }
+
+    #[test]
     fn thought_chunks_stream() {
         let (bridge, rx, id) = start_ready();
         bridge.prompt(id, "think").unwrap();

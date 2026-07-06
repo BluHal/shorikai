@@ -2116,6 +2116,55 @@
   color: var(--text-4);
 }
 
+/* plan / todo checklist card */
+.chat-plan {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 14px;
+  max-width: 520px;
+}
+
+.chat-plan-title {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-4);
+  margin-bottom: 6px;
+}
+
+.chat-plan-item {
+  display: flex;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  padding: 2px 0;
+}
+
+.chat-plan-mark {
+  flex: none;
+  width: 14px;
+  color: var(--text-4);
+}
+
+.chat-plan-in_progress {
+  color: var(--text-1);
+}
+
+.chat-plan-in_progress .chat-plan-mark {
+  color: var(--accent);
+}
+
+.chat-plan-completed {
+  color: var(--text-4);
+  text-decoration: line-through;
+}
+
+.chat-plan-completed .chat-plan-mark {
+  color: var(--success);
+  text-decoration: none;
+}
+
 /* agent thinking: dim, collapsible */
 .chat-thought {
   cursor: pointer;

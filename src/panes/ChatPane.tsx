@@ -18,10 +18,13 @@ import {
 
 type PermissionOption = { optionId: string; name: string; kind?: string };
 
+type PlanEntry = { content: string; status: string };
+
 type Row =
   | { kind: "user"; text: string }
   | { kind: "agent"; text: string; done: boolean }
   | { kind: "thought"; text: string; done: boolean; open?: boolean }
+  | { kind: "plan"; entries: PlanEntry[] }
   | { kind: "system"; text: string; restart?: boolean }
   | { kind: "team"; ids: string[] }
   | ToolRow
@@ -99,7 +102,7 @@ type AcpEvent = {
   agent_id: number;
   session_id?: string;
   text?: string;
-  update?: ToolUpdate;
+  update?: ToolUpdate & { entries?: PlanEntry[] };
   sub?: SubAgent;
   options?: ConfigState & { currentModeId?: string };
   request_id?: unknown;
@@ -324,6 +327,22 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             setRows((r) => applyToolUpdate(r, u));
           }
           break;
+        case "plan": {
+          const entries = ev.update?.entries ?? [];
+          setRows((r) => {
+            // one card per turn: update the last plan row of this turn in place
+            for (let i = r.length - 1; i >= 0; i--) {
+              if (r[i].kind === "user") break;
+              if (r[i].kind === "plan") {
+                const copy = [...r];
+                copy[i] = { kind: "plan", entries };
+                return copy;
+              }
+            }
+            return [...r, { kind: "plan", entries }];
+          });
+          break;
+        }
         case "sub_agent_update": {
           const sub = ev.sub;
           if (!sub) break;
@@ -589,6 +608,24 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                         open {agent} in a terminal
                       </button>
                     )}
+                  </div>
+                );
+              case "plan":
+                return (
+                  <div key={i} className="chat-plan">
+                    <div className="chat-plan-title">Plan</div>
+                    {row.entries.map((e, j) => (
+                      <div key={j} className={`chat-plan-item chat-plan-${e.status}`}>
+                        <span className="chat-plan-mark">
+                          {e.status === "completed"
+                            ? "✓"
+                            : e.status === "in_progress"
+                              ? "▸"
+                              : "○"}
+                        </span>
+                        {e.content}
+                      </div>
+                    ))}
                   </div>
                 );
               case "tool":

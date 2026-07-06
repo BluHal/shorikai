@@ -173,6 +173,25 @@ rl.on("line", (line) => {
         });
         break;
       }
+      if (text === "plan") {
+        update({
+          sessionUpdate: "plan",
+          entries: [
+            { content: "Read the config", priority: "medium", status: "in_progress" },
+            { content: "Write the fix", priority: "medium", status: "pending" },
+          ],
+        });
+        update({
+          sessionUpdate: "plan",
+          entries: [
+            { content: "Read the config", priority: "medium", status: "completed" },
+            { content: "Write the fix", priority: "medium", status: "in_progress" },
+          ],
+        });
+        chunk("done");
+        send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+        break;
+      }
       if (text === "think") {
         update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hmm, " } });
         update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "let me check" } });
