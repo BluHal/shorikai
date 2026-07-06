@@ -1370,21 +1370,81 @@
   gap: 7px;
 }
 
-.chat-agent-picker {
-  appearance: none;
+/* custom dropdown (agent / mode / model pickers) */
+.chat-dd {
+  position: relative;
+}
+
+.chat-dd-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-xs);
   color: var(--text-3);
   font-family: inherit;
   font-size: var(--fs-2xs);
-  padding: 1px 6px;
+  padding: 2px 7px;
   cursor: pointer;
   outline: none;
+  white-space: nowrap;
 }
 
-.chat-agent-picker:hover {
+.chat-dd-btn:hover:not(:disabled) {
   border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.chat-dd-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-dd-chev {
+  font-size: 8px;
+  color: var(--text-4);
+}
+
+.chat-dd-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 3px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.chat-dd-menu.chat-dd-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.chat-dd-item {
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  padding: 4px 9px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-dd-item:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.chat-dd-active {
   color: var(--accent);
 }
 
@@ -1394,6 +1454,25 @@
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+/* mode/model pickers + cwd·branch, under the chat input */
+.chat-input-meta {
+  max-width: 760px;
+  margin: 6px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-context {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-dot {

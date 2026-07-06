@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Markdown from "react-markdown";
@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { ToolCard, ToolContentItem, ToolRow } from "./ToolCard";
 import { mdComponentsFor } from "./mdComponents";
 import { setAgentStatus, useProjectRoot } from "../projects";
+import { getGitFor, subscribeGit, trackGitRoot } from "../gitStore";
 import { bus } from "../bus";
 import {
   AgentStrip,
@@ -76,6 +77,11 @@ function applyToolUpdate(rows: Row[], u: ToolUpdate): Row[] {
   );
 }
 
+type ConfigState = {
+  modes?: { currentModeId: string; availableModes: { id: string; name: string }[] };
+  models?: { currentModelId: string; availableModels: { modelId: string; name: string }[] };
+};
+
 type AcpEvent = {
   kind:
     | "session_ready"
@@ -84,14 +90,17 @@ type AcpEvent = {
     | "tool_call"
     | "plan"
     | "sub_agent_update"
+    | "config_options"
     | "permission_request"
     | "turn_ended"
     | "agent_exit"
     | "error";
   agent_id: number;
+  session_id?: string;
   text?: string;
   update?: ToolUpdate;
   sub?: SubAgent;
+  options?: ConfigState & { currentModeId?: string };
   request_id?: unknown;
   request?: {
     toolCall?: { title?: string };
@@ -112,6 +121,90 @@ const displayName = (key: string) =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 
+// current Claude lineup with exact ids; the adapter only advertises a couple
+// of aliases, so these are merged into whatever it reports
+const KNOWN_MODELS = [
+  { modelId: "claude-fable-5", name: "Fable 5" },
+  { modelId: "claude-opus-4-8", name: "Opus 4.8" },
+  { modelId: "claude-opus-4-7", name: "Opus 4.7" },
+  { modelId: "claude-opus-4-6", name: "Opus 4.6" },
+  { modelId: "claude-sonnet-5", name: "Sonnet 5" },
+  { modelId: "claude-sonnet-4-6", name: "Sonnet 4.6" },
+  { modelId: "claude-haiku-4-5", name: "Haiku 4.5" },
+];
+
+// SDK session option; changing it requires a session restart
+const EFFORTS = ["low", "medium", "high", "max"].map((e) => ({
+  value: e,
+  label: `effort: ${e}`,
+}));
+
+const fmtTokens = (n: number) =>
+  n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
+
+/// App-styled replacement for a native <select>: button + popup list.
+function Dropdown(props: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  title?: string;
+  disabled?: boolean;
+  /// open the menu above the button (for controls at the bottom of the pane)
+  up?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const current = props.options.find((o) => o.value === props.value);
+  return (
+    <div className="chat-dd" ref={ref}>
+      <button
+        className="chat-dd-btn"
+        title={props.title}
+        disabled={props.disabled}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {current?.label ?? props.value}
+        <span className="chat-dd-chev">{props.up ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className={`chat-dd-menu${props.up ? " chat-dd-up" : ""}`}>
+          {props.options.map((o) => (
+            <button
+              key={o.value}
+              className={`chat-dd-item${
+                o.value === props.value ? " chat-dd-active" : ""
+              }`}
+              onClick={() => {
+                setOpen(false);
+                if (o.value !== props.value) props.onChange(o.value);
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const root = useProjectRoot();
   const mdComponents = mdComponentsFor(root);
@@ -122,21 +215,48 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const [drill, setDrill] = useState<string | null>(null);
   const [agent, setAgent] = useState("claude-code");
   const [agents, setAgents] = useState<Record<string, AgentConfig>>({});
+  const [config, setConfig] = useState<ConfigState>({});
+  const [effort, setEffort] = useState("high");
+  const [ctxTokens, setCtxTokens] = useState<number | null>(null);
+  const [plan, setPlan] = useState<{ utilization: number; resets_at: string } | null>(null);
+  const git = useSyncExternalStore(subscribeGit, () => getGitFor(root));
   const agentRef = useRef(agent);
   agentRef.current = agent;
+  const effortRef = useRef(effort);
+  effortRef.current = effort;
   const agentIdRef = useRef<number | null>(null);
+  const sessionIdRef = useRef("");
   const subsRef = useRef<SubAgent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const refreshUsage = () => {
+    if (sessionIdRef.current && agentRef.current.startsWith("claude")) {
+      invoke<{ context_tokens: number }>("claude_context_usage", {
+        cwd: root,
+        sessionId: sessionIdRef.current,
+      })
+        .then((u) => setCtxTokens(u.context_tokens))
+        .catch(() => {});
+    }
+    invoke<{ five_hour?: { utilization: number; resets_at: string } }>("plan_usage")
+      .then((u) => u.five_hour && setPlan(u.five_hour))
+      .catch(() => {});
+  };
 
   const start = async (name = agentRef.current) => {
     setStatus("starting");
     subsRef.current = [];
     setSubs([]);
     setDrill(null);
+    setConfig({});
+    sessionIdRef.current = "";
+    setCtxTokens(null);
     try {
       agentIdRef.current = await invoke<number>("acp_start", {
         agent: name,
         cwd: root,
+        // effort is a claude-code SDK option; other agents don't understand it
+        effort: name.startsWith("claude") ? effortRef.current : null,
       });
     } catch (err) {
       setStatus("dead");
@@ -164,7 +284,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
       if (ev.agent_id !== agentIdRef.current) return;
       switch (ev.kind) {
         case "session_ready":
+          sessionIdRef.current = ev.session_id ?? "";
           setStatus("ready");
+          refreshUsage();
           break;
         case "agent_text":
           setRows((r) => {
@@ -204,6 +326,18 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           }
           break;
         }
+        case "config_options": {
+          const o = ev.options ?? {};
+          setConfig((c) => ({
+            modes:
+              o.modes ??
+              (o.currentModeId && c.modes
+                ? { ...c.modes, currentModeId: o.currentModeId }
+                : c.modes),
+            models: o.models ?? c.models,
+          }));
+          break;
+        }
         case "permission_request":
           setAgentStatus(root, "attention");
           setRows((r) => [
@@ -224,6 +358,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           );
           setStatus("ready");
           setAgentStatus(root, "attention"); // downgraded to idle if tab is active
+          refreshUsage();
           break;
         case "agent_exit":
           setStatus("dead");
@@ -249,6 +384,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     invoke<Record<string, AgentConfig>>("acp_agents")
       .then(setAgents)
       .catch(() => {});
+    trackGitRoot(root);
     start();
     return () => {
       unlisten.then((u) => u());
@@ -289,6 +425,35 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     );
   };
 
+  // optimistic update; the agent's current_mode_update confirms or corrects
+  const setMode = (modeId: string) => {
+    invoke("acp_set_mode", { id: agentIdRef.current, modeId }).catch(() => {});
+    setConfig((c) =>
+      c.modes ? { ...c, modes: { ...c.modes, currentModeId: modeId } } : c,
+    );
+  };
+
+  const setModel = (modelId: string) => {
+    invoke("acp_set_model", { id: agentIdRef.current, modelId }).catch(() => {});
+    setConfig((c) =>
+      c.models ? { ...c, models: { ...c.models, currentModelId: modelId } } : c,
+    );
+  };
+
+  // effort is fixed at session creation, so changing it restarts the session
+  const changeEffort = (e: string) => {
+    setEffort(e);
+    effortRef.current = e;
+    const oldId = agentIdRef.current;
+    if (oldId != null) invoke("acp_kill", { id: oldId }).catch(() => {});
+    agentIdRef.current = null;
+    setRows((r) => [
+      ...r,
+      { kind: "system", text: `effort set to ${e} — new session` },
+    ]);
+    start();
+  };
+
   const statusText: Record<Status, string> = {
     starting: "starting…",
     ready: "ready",
@@ -298,6 +463,16 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
 
   const drilledSub = drill ? subs.find((s) => s.id === drill) : undefined;
 
+  const advertised = config.models?.availableModels ?? [];
+  const modelOptions = config.models
+    ? [
+        ...advertised,
+        ...KNOWN_MODELS.filter(
+          (k) => !advertised.some((m) => m.modelId === k.modelId),
+        ),
+      ].map((m) => ({ value: m.modelId, label: m.name }))
+    : null;
+
   return (
     <div className="chat-pane">
       <div className="chat-header">
@@ -306,18 +481,15 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           <span className="chat-name">
             {displayName(agent)}
             {Object.keys(agents).length > 1 && (
-              <select
-                className="chat-agent-picker"
-                value={agent}
+              <Dropdown
                 title="Switch agent"
-                onChange={(e) => switchAgent(e.target.value)}
-              >
-                {Object.keys(agents).map((name) => (
-                  <option key={name} value={name}>
-                    {displayName(name)}
-                  </option>
-                ))}
-              </select>
+                value={agent}
+                options={Object.keys(agents).map((name) => ({
+                  value: name,
+                  label: displayName(name),
+                }))}
+                onChange={switchAgent}
+              />
             )}
           </span>
           <span className="chat-status">
@@ -441,6 +613,56 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             }
           }}
         />
+        <div className="chat-input-meta">
+          {config.modes && (
+            <Dropdown
+              up
+              title="Permission mode"
+              disabled={status === "dead"}
+              value={config.modes.currentModeId}
+              options={config.modes.availableModes.map((m) => ({
+                value: m.id,
+                label: m.name,
+              }))}
+              onChange={setMode}
+            />
+          )}
+          {modelOptions && (
+            <Dropdown
+              up
+              title="Model"
+              disabled={status === "dead"}
+              value={config.models!.currentModelId}
+              options={modelOptions}
+              onChange={setModel}
+            />
+          )}
+          {agent.startsWith("claude") && (
+            <Dropdown
+              up
+              title="Effort — changing restarts the session"
+              disabled={status === "dead"}
+              value={effort}
+              options={EFFORTS}
+              onChange={changeEffort}
+            />
+          )}
+          <span
+            className="chat-context"
+            title={[
+              root,
+              ctxTokens != null ? `${ctxTokens.toLocaleString()} context tokens in use` : "",
+              plan ? `5h window resets ${new Date(plan.resets_at).toLocaleTimeString()}` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          >
+            {ctxTokens != null ? `ctx ${fmtTokens(ctxTokens)} · ` : ""}
+            {plan ? `5h ${Math.round(plan.utilization)}% · ` : ""}
+            {root.split("/").pop()}
+            {git?.branch ? ` · ⎇ ${git.branch}` : ""}
+          </span>
+        </div>
       </div>
     </div>
   );

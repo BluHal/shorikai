@@ -24,6 +24,9 @@ pub enum AcpEvent {
     /// Task tool calls normalized into sub-agent state; full state per event
     /// so the frontend just replaces by id
     SubAgentUpdate { agent_id: u32, sub: SubAgentState },
+    /// modes/models offered by the agent (from session/new), plus
+    /// currentModeId-only updates when the agent switches mode itself
+    ConfigOptions { agent_id: u32, options: Value },
     PermissionRequest { agent_id: u32, request_id: Value, request: Value },
     TurnEnded { agent_id: u32, stop_reason: String },
     AgentExit { agent_id: u32, code: Option<i32> },
@@ -131,8 +134,9 @@ impl AcpBridge {
 
     /// Spawn an agent adapter and run the ACP handshake (initialize +
     /// session/new with `cwd`) in the background; SessionReady or Error
-    /// arrives on the event stream.
-    pub fn start(&self, config: &AgentConfig, cwd: &str) -> Result<u32, String> {
+    /// arrives on the event stream. `meta` is passed as session/new `_meta`
+    /// (e.g. claude-code adapter options like effort).
+    pub fn start(&self, config: &AgentConfig, cwd: &str, meta: Option<Value>) -> Result<u32, String> {
         let mut child = Command::new(&config.command)
             .args(&config.args)
             .current_dir(cwd)
@@ -172,32 +176,44 @@ impl AcpBridge {
         let agents = Arc::clone(&self.agents);
         let on_event = Arc::clone(&self.on_event);
         let cwd = cwd.to_owned();
-        std::thread::spawn(move || {
-            if let Err(message) = handshake(agent_id, &cwd, &agents) {
-                on_event(AcpEvent::Error { agent_id, message });
-            } else {
-                let session_id = agents.lock().unwrap()[&agent_id]
-                    .session_id
-                    .clone()
-                    .unwrap_or_default();
+        std::thread::spawn(move || match handshake(agent_id, &cwd, meta, &agents) {
+            Err(message) => on_event(AcpEvent::Error { agent_id, message }),
+            Ok(result) => {
+                let session_id = result
+                    .get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_owned();
                 on_event(AcpEvent::SessionReady { agent_id, session_id });
+                let mut options = serde_json::Map::new();
+                for key in ["modes", "models"] {
+                    if let Some(v) = result.get(key).filter(|v| !v.is_null()) {
+                        options.insert(key.into(), v.clone());
+                    }
+                }
+                if !options.is_empty() {
+                    on_event(AcpEvent::ConfigOptions { agent_id, options: options.into() });
+                }
             }
         });
 
         Ok(agent_id)
     }
 
-    /// Send a user prompt; TurnEnded is emitted when the agent finishes.
-    pub fn prompt(&self, agent_id: u32, text: &str) -> Result<(), String> {
-        let session_id = self
-            .agents
+    fn session_id(&self, agent_id: u32) -> Result<String, String> {
+        self.agents
             .lock()
             .unwrap()
             .get(&agent_id)
-            .ok_or("no such agent")?
+            .ok_or_else(|| "no such agent".to_string())?
             .session_id
             .clone()
-            .ok_or("session not ready")?;
+            .ok_or_else(|| "session not ready".to_string())
+    }
+
+    /// Send a user prompt; TurnEnded is emitted when the agent finishes.
+    pub fn prompt(&self, agent_id: u32, text: &str) -> Result<(), String> {
+        let session_id = self.session_id(agent_id)?;
         let rx = send_request(
             &self.agents,
             agent_id,
@@ -245,14 +261,32 @@ impl AcpBridge {
         )
     }
 
+    /// Fire-and-forget session/set_mode; the agent confirms with a
+    /// current_mode_update, which comes back as another ConfigOptions event.
+    pub fn set_mode(&self, agent_id: u32, mode_id: &str) -> Result<(), String> {
+        let session_id = self.session_id(agent_id)?;
+        send_request(
+            &self.agents,
+            agent_id,
+            "session/set_mode",
+            json!({ "sessionId": session_id, "modeId": mode_id }),
+        )
+        .map(drop)
+    }
+
+    pub fn set_model(&self, agent_id: u32, model_id: &str) -> Result<(), String> {
+        let session_id = self.session_id(agent_id)?;
+        send_request(
+            &self.agents,
+            agent_id,
+            "session/set_model",
+            json!({ "sessionId": session_id, "modelId": model_id }),
+        )
+        .map(drop)
+    }
+
     pub fn cancel(&self, agent_id: u32) -> Result<(), String> {
-        let session_id = self
-            .agents
-            .lock()
-            .unwrap()
-            .get(&agent_id)
-            .and_then(|a| a.session_id.clone())
-            .ok_or("no such agent")?;
+        let session_id = self.session_id(agent_id)?;
         write_message(
             &self.agents,
             agent_id,
@@ -286,7 +320,14 @@ fn kill_group(child: &mut Child) {
     let _ = child.kill(); // in case the group was already gone
 }
 
-fn handshake(agent_id: u32, cwd: &str, agents: &Agents) -> Result<(), String> {
+/// Runs initialize + session/new; returns the session/new result so the
+/// caller can surface modes/models.
+fn handshake(
+    agent_id: u32,
+    cwd: &str,
+    meta: Option<Value>,
+    agents: &Agents,
+) -> Result<Value, String> {
     // generous timeout: `npx` may download the adapter on first run
     const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
     let recv = |rx: mpsc::Receiver<Result<Value, String>>| {
@@ -308,12 +349,11 @@ fn handshake(agent_id: u32, cwd: &str, agents: &Agents) -> Result<(), String> {
     )?;
     recv(rx)?;
 
-    let rx = send_request(
-        agents,
-        agent_id,
-        "session/new",
-        json!({ "cwd": cwd, "mcpServers": [] }),
-    )?;
+    let mut params = json!({ "cwd": cwd, "mcpServers": [] });
+    if let Some(m) = meta {
+        params["_meta"] = m;
+    }
+    let rx = send_request(agents, agent_id, "session/new", params)?;
     let result = recv(rx)?;
     let session_id = result
         .get("sessionId")
@@ -323,7 +363,7 @@ fn handshake(agent_id: u32, cwd: &str, agents: &Agents) -> Result<(), String> {
     if let Some(a) = agents.lock().unwrap().get_mut(&agent_id) {
         a.session_id = Some(session_id);
     }
-    Ok(())
+    Ok(result)
 }
 
 fn send_request(
@@ -438,7 +478,11 @@ fn handle_message(
                     }
                 }
                 Some("plan") => on_event(AcpEvent::Plan { agent_id, update }),
-                _ => {} // user_message_chunk, mode/commands updates: not needed yet
+                Some("current_mode_update") => on_event(AcpEvent::ConfigOptions {
+                    agent_id,
+                    options: json!({ "currentModeId": update.get("currentModeId") }),
+                }),
+                _ => {} // user_message_chunk, commands updates: not needed yet
             }
         }
         _ => {} // other notifications: ignore
@@ -533,10 +577,21 @@ mod tests {
         let bridge = AcpBridge::new(move |e| {
             tx.send(e).ok();
         });
-        let id = bridge.start(&fake_agent(), "/tmp").unwrap();
+        let id = bridge.start(&fake_agent(), "/tmp", None).unwrap();
         match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
             AcpEvent::SessionReady { session_id, .. } => assert_eq!(session_id, "sess_fake"),
             other => panic!("expected SessionReady, got {other:?}"),
+        }
+        // fake agent always advertises modes + models after session/new
+        match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+            AcpEvent::ConfigOptions { options, .. } => {
+                assert_eq!(options.pointer("/modes/currentModeId").unwrap(), "default");
+                assert_eq!(
+                    options.pointer("/models/availableModels/1/modelId").unwrap(),
+                    "opus"
+                );
+            }
+            other => panic!("expected ConfigOptions, got {other:?}"),
         }
         (bridge, rx, id)
     }
@@ -686,6 +741,23 @@ mod tests {
     }
 
     #[test]
+    fn set_mode_round_trip() {
+        let (bridge, rx, id) = start_ready();
+        bridge.set_mode(id, "acceptEdits").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(deadline - Instant::now()).unwrap() {
+                AcpEvent::ConfigOptions { options, .. } => {
+                    assert_eq!(options["currentModeId"], "acceptEdits");
+                    break;
+                }
+                _ => {}
+            }
+        }
+        bridge.kill(id).unwrap();
+    }
+
+    #[test]
     fn kill_reaches_wrapper_grandchildren() {
         // agent behind a wrapper (like npx): sh forks node, which inherits
         // the stdout pipe. Without a process-group kill, killing sh leaves
@@ -704,7 +776,7 @@ mod tests {
                 ),
             ],
         };
-        let id = bridge.start(&wrapper, "/tmp").unwrap();
+        let id = bridge.start(&wrapper, "/tmp", None).unwrap();
         match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
             AcpEvent::SessionReady { .. } => {}
             other => panic!("expected SessionReady, got {other:?}"),

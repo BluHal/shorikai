@@ -43,7 +43,34 @@ rl.on("line", (line) => {
       });
       break;
     case "session/new":
-      send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "sess_fake" } });
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: {
+          sessionId: "sess_fake",
+          modes: {
+            currentModeId: "default",
+            availableModes: [
+              { id: "default", name: "Always Ask" },
+              { id: "acceptEdits", name: "Accept Edits" },
+            ],
+          },
+          models: {
+            currentModelId: "sonnet",
+            availableModels: [
+              { modelId: "sonnet", name: "Sonnet" },
+              { modelId: "opus", name: "Opus" },
+            ],
+          },
+        },
+      });
+      break;
+    case "session/set_mode":
+      send({ jsonrpc: "2.0", id: msg.id, result: null });
+      update({ sessionUpdate: "current_mode_update", currentModeId: msg.params.modeId });
+      break;
+    case "session/set_model":
+      send({ jsonrpc: "2.0", id: msg.id, result: null });
       break;
     case "session/prompt": {
       const text = msg.params.prompt[0].text;

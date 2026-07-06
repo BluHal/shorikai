@@ -70,10 +70,17 @@ fn acp_agents() -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn acp_start(bridge: State<AcpBridge>, agent: String, cwd: String) -> Result<u32, String> {
-    eprintln!("[acp] start requested: agent={agent} cwd={cwd}");
+fn acp_start(
+    bridge: State<AcpBridge>,
+    agent: String,
+    cwd: String,
+    effort: Option<String>,
+) -> Result<u32, String> {
+    eprintln!("[acp] start requested: agent={agent} cwd={cwd} effort={effort:?}");
     let config = acp_bridge::load_agent_config(&agent)?;
-    let started = bridge.start(&config, &cwd);
+    // claude-code adapter forwards _meta.claudeCode.options into the SDK
+    let meta = effort.map(|e| serde_json::json!({ "claudeCode": { "options": { "effort": e } } }));
+    let started = bridge.start(&config, &cwd, meta);
     eprintln!("[acp] start result: {started:?}");
     started
 }
@@ -94,6 +101,16 @@ fn acp_permission_response(
 }
 
 #[tauri::command]
+fn acp_set_mode(bridge: State<AcpBridge>, id: u32, mode_id: String) -> Result<(), String> {
+    bridge.set_mode(id, &mode_id)
+}
+
+#[tauri::command]
+fn acp_set_model(bridge: State<AcpBridge>, id: u32, model_id: String) -> Result<(), String> {
+    bridge.set_model(id, &model_id)
+}
+
+#[tauri::command]
 fn acp_cancel(bridge: State<AcpBridge>, id: u32) -> Result<(), String> {
     bridge.cancel(id)
 }
@@ -106,6 +123,72 @@ fn acp_kill(bridge: State<AcpBridge>, id: u32) -> Result<(), String> {
 #[tauri::command]
 fn acp_reset(bridge: State<AcpBridge>) {
     bridge.kill_all();
+}
+
+/// 5h/7d plan utilization from the same OAuth endpoint Claude Code's /usage
+/// uses, authenticated with the Claude Code keychain credential.
+/// ponytail: shells out to security + curl instead of adding an HTTP dep
+#[tauri::command]
+fn plan_usage() -> Result<Value, String> {
+    let creds = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !creds.status.success() {
+        return Err("no Claude Code credentials in keychain".into());
+    }
+    let creds: Value = serde_json::from_slice(&creds.stdout).map_err(|e| e.to_string())?;
+    let token = creds
+        .pointer("/claudeAiOauth/accessToken")
+        .and_then(|v| v.as_str())
+        .ok_or("no access token in credentials")?;
+    let out = std::process::Command::new("curl")
+        .args([
+            "-sf",
+            "-m",
+            "10",
+            "https://api.anthropic.com/api/oauth/usage",
+            "-H",
+            &format!("Authorization: Bearer {token}"),
+            "-H",
+            "anthropic-beta: oauth-2025-04-20",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err("usage endpoint request failed".into());
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("usage endpoint: {e}"))
+}
+
+/// Context tokens currently in use for a Claude Code session: usage of the
+/// last assistant message in the transcript the SDK writes under
+/// ~/.claude/projects/<cwd-slug>/<session-id>.jsonl
+#[tauri::command]
+fn claude_context_usage(cwd: String, session_id: String) -> Result<Value, String> {
+    if session_id.contains('/') || session_id.contains("..") {
+        return Err("invalid session id".into());
+    }
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let slug: String = cwd
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let path = format!("{home}/.claude/projects/{slug}/{session_id}.jsonl");
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    // ponytail: whole-file read + reverse scan; tail-seek if transcripts get huge
+    for line in text.lines().rev() {
+        let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
+        let Some(usage) = entry.pointer("/message/usage") else { continue };
+        let tokens: u64 = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
+            .iter()
+            .map(|k| usage.get(*k).and_then(|v| v.as_u64()).unwrap_or(0))
+            .sum();
+        if tokens > 0 {
+            return Ok(serde_json::json!({ "context_tokens": tokens }));
+        }
+    }
+    Ok(serde_json::json!({ "context_tokens": 0 }))
 }
 
 #[tauri::command]
@@ -418,9 +501,13 @@ pub fn run() {
             acp_start,
             acp_prompt,
             acp_permission_response,
+            acp_set_mode,
+            acp_set_model,
             acp_cancel,
             acp_kill,
             acp_reset,
+            plan_usage,
+            claude_context_usage,
             ws_watch,
             ws_unwatch,
             session_load,
