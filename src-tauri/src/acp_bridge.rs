@@ -767,6 +767,23 @@ mod tests {
     }
 
     #[test]
+    fn prompt_blocks_carry_images() {
+        let (bridge, rx, id) = start_ready();
+        bridge
+            .prompt_blocks(
+                id,
+                json!([
+                    { "type": "text", "text": "what is this" },
+                    { "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" },
+                ]),
+            )
+            .unwrap();
+        let (text, _) = drain_turn(&rx);
+        assert_eq!(text, "images:1:image/png");
+        bridge.kill(id).unwrap();
+    }
+
+    #[test]
     fn available_commands_pass_through() {
         let (bridge, rx, id) = start_ready();
         bridge.prompt(id, "commands").unwrap();

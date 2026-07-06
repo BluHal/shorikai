@@ -91,4 +91,4 @@ shorikai/
 
 ### Why "Shorikai"?
 
-The name comes from [**Shorikai, Genesis Engine**](https://scryfall.com/card/neo/44/shorikai-genesis-engine) — a legendary Vehicle artifact from *Magic: The Gathering* (Kamigawa: Neon Dynasty). Shorikai is a giant mech that draws cards and creates Pilot tokens to crew itself. It felt like the perfect metaphor: an AI-powered cockpit that bootstraps its own crew of agents to get the job done. Plus, it's a mech. Who doesn't want to work inside a mech?
+The name comes from [**Shorikai, Genesis Engine**](https://scryfall.com/card/sld/1880/shorikai-genesis-engine) — a legendary Vehicle artifact from *Magic: The Gathering* (Kamigawa: Neon Dynasty). Shorikai is a giant mech that draws cards and creates Pilot tokens to crew itself. It felt like the perfect metaphor: an AI-powered cockpit that bootstraps its own crew of agents to get the job done. Plus, it's a mech. Who doesn't want to work inside a mech?

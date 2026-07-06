@@ -26,8 +26,17 @@ type SlashCommand = {
   input?: { hint?: string } | null;
 };
 
+type Attachment = { id: number; mediaType: string; data: string };
+
 type Row =
-  | { kind: "user"; text: string; queued?: boolean; qid?: number; mentions?: string[] }
+  | {
+      kind: "user";
+      text: string;
+      queued?: boolean;
+      qid?: number;
+      mentions?: string[];
+      images?: Attachment[];
+    }
   | { kind: "agent"; text: string; done: boolean }
   | { kind: "thought"; text: string; done: boolean; open?: boolean }
   | { kind: "plan"; entries: PlanEntry[] }
@@ -236,6 +245,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const [fileDismissed, setFileDismissed] = useState(false);
   // every path ever picked via @; send() links the ones still in the text
   const mentionsRef = useRef<string[]>([]);
+  const [images, setImages] = useState<Attachment[]>([]);
   const [effort, setEffort] = useState("high");
   const [ctxTokens, setCtxTokens] = useState<number | null>(null);
   const [plan, setPlan] = useState<{ utilization: number; resets_at: string } | null>(null);
@@ -247,7 +257,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const agentIdRef = useRef<number | null>(null);
   const sessionIdRef = useRef("");
   // messages typed while the agent was busy, sent one per turn end
-  const queueRef = useRef<{ qid: number; text: string; mentions: string[] }[]>([]);
+  const queueRef = useRef<
+    { qid: number; text: string; mentions: string[]; images: Attachment[] }[]
+  >([]);
   const nextQidRef = useRef(1);
   const subsRef = useRef<SubAgent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -427,7 +439,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             setRows((r) =>
               r.filter((x) => !(x.kind === "user" && x.qid === next.qid)),
             );
-            sendText(next.text, next.mentions);
+            sendText(next.text, next.mentions, next.images);
           } else {
             setStatus("ready");
             setAgentStatus(root, "attention"); // downgraded to idle if tab is active
@@ -472,23 +484,33 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [rows]);
 
-  const sendText = (text: string, mentions: string[] = []) => {
-    setRows((r) => [...r, { kind: "user", text, mentions }]);
+  const sendText = (
+    text: string,
+    mentions: string[] = [],
+    imgs: Attachment[] = [],
+  ) => {
+    setRows((r) => [...r, { kind: "user", text, mentions, images: imgs }]);
     setStatus("busy");
     setAgentStatus(root, "working");
-    const call = mentions.length
-      ? invoke("acp_prompt_blocks", {
-          id: agentIdRef.current,
-          prompt: [
-            { type: "text", text },
-            ...mentions.map((p) => ({
-              type: "resource_link",
-              uri: `file://${root}/${p}`,
-              name: p,
-            })),
-          ],
-        })
-      : invoke("acp_prompt", { id: agentIdRef.current, text });
+    const call =
+      mentions.length || imgs.length
+        ? invoke("acp_prompt_blocks", {
+            id: agentIdRef.current,
+            prompt: [
+              ...(text ? [{ type: "text", text }] : []),
+              ...mentions.map((p) => ({
+                type: "resource_link",
+                uri: `file://${root}/${p}`,
+                name: p,
+              })),
+              ...imgs.map((im) => ({
+                type: "image",
+                data: im.data,
+                mimeType: im.mediaType,
+              })),
+            ],
+          })
+        : invoke("acp_prompt", { id: agentIdRef.current, text });
     call.catch((err) => {
       setStatus("ready");
       setAgentStatus(root, "idle");
@@ -498,16 +520,22 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
 
   const send = () => {
     const text = input.trim();
-    if (!text || status === "dead" || status === "starting") return;
+    if ((!text && images.length === 0) || status === "dead" || status === "starting")
+      return;
     const mentions = mentionsRef.current.filter((p) => text.includes(`@${p}`));
+    const imgs = images;
     setInput("");
+    setImages([]);
     if (status === "busy") {
       const qid = nextQidRef.current++;
-      queueRef.current.push({ qid, text, mentions });
-      setRows((r) => [...r, { kind: "user", text, queued: true, qid, mentions }]);
+      queueRef.current.push({ qid, text, mentions, images: imgs });
+      setRows((r) => [
+        ...r,
+        { kind: "user", text, queued: true, qid, mentions, images: imgs },
+      ]);
       return;
     }
-    sendText(text, mentions);
+    sendText(text, mentions, imgs);
   };
 
   const removeQueued = (qid: number) => {
@@ -606,6 +634,20 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     setFileSel(0);
   };
 
+  const attachImage = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string; // data:image/png;base64,…
+      const comma = url.indexOf(",");
+      const mediaType = url.slice(5, url.indexOf(";"));
+      setImages((im) => [
+        ...im,
+        { id: nextQidRef.current++, mediaType, data: url.slice(comma + 1) },
+      ]);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const advertised = config.models?.availableModels ?? [];
   const modelOptions = config.models
     ? [
@@ -678,6 +720,18 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                         >
                           ×
                         </button>
+                      )}
+                      {(row.images?.length ?? 0) > 0 && (
+                        <div className="chat-mentions">
+                          {row.images!.map((im) => (
+                            <img
+                              key={im.id}
+                              className="chat-bubble-image"
+                              src={`data:${im.mediaType};base64,${im.data}`}
+                              alt="attachment"
+                            />
+                          ))}
+                        </div>
                       )}
                       {(row.mentions?.length ?? 0) > 0 && (
                         <div className="chat-mentions">
@@ -834,10 +888,50 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             ))}
           </div>
         )}
+        {images.length > 0 && (
+          <div className="chat-attachments">
+            {images.map((im) => (
+              <span key={im.id} className="chat-attachment">
+                <img
+                  src={`data:${im.mediaType};base64,${im.data}`}
+                  alt="attachment"
+                />
+                <button
+                  title="Remove image"
+                  onClick={() =>
+                    setImages((list) => list.filter((x) => x.id !== im.id))
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <textarea
           className="chat-input"
           rows={2}
           value={input}
+          onPaste={(e) => {
+            const files = [...e.clipboardData.items]
+              .filter((it) => it.type.startsWith("image/"))
+              .map((it) => it.getAsFile())
+              .filter((f): f is File => f != null);
+            if (files.length) {
+              e.preventDefault();
+              files.forEach(attachImage);
+            }
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            const files = [...e.dataTransfer.files].filter((f) =>
+              f.type.startsWith("image/"),
+            );
+            if (files.length) {
+              e.preventDefault();
+              files.forEach(attachImage);
+            }
+          }}
           placeholder={
             status === "ready"
               ? "message claude code — enter to send"

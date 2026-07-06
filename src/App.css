@@ -2171,6 +2171,52 @@
   color: var(--text-4);
 }
 
+/* pending image attachments above the input */
+.chat-attachments {
+  max-width: 760px;
+  margin: 0 auto 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-attachment {
+  position: relative;
+  display: inline-flex;
+}
+
+.chat-attachment img {
+  height: 48px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+}
+
+.chat-attachment button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+}
+
+.chat-attachment button:hover {
+  color: var(--error);
+}
+
+.chat-bubble-image {
+  max-height: 120px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+}
+
 /* @-file mention chips inside user bubbles */
 .chat-mentions {
   display: flex;
