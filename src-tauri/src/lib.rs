@@ -91,6 +91,11 @@ fn acp_prompt(bridge: State<AcpBridge>, id: u32, text: String) -> Result<(), Str
 }
 
 #[tauri::command]
+fn acp_prompt_blocks(bridge: State<AcpBridge>, id: u32, prompt: Value) -> Result<(), String> {
+    bridge.prompt_blocks(id, prompt)
+}
+
+#[tauri::command]
 fn acp_permission_response(
     bridge: State<AcpBridge>,
     id: u32,
@@ -500,6 +505,7 @@ pub fn run() {
             acp_agents,
             acp_start,
             acp_prompt,
+            acp_prompt_blocks,
             acp_permission_response,
             acp_set_mode,
             acp_set_model,

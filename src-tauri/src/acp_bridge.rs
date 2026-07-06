@@ -213,17 +213,20 @@ impl AcpBridge {
             .ok_or_else(|| "session not ready".to_string())
     }
 
-    /// Send a user prompt; TurnEnded is emitted when the agent finishes.
+    /// Send a plain-text user prompt; TurnEnded is emitted when the agent
+    /// finishes.
     pub fn prompt(&self, agent_id: u32, text: &str) -> Result<(), String> {
+        self.prompt_blocks(agent_id, json!([{ "type": "text", "text": text }]))
+    }
+
+    /// Send a prompt as raw ACP content blocks (text, resource_link, image…).
+    pub fn prompt_blocks(&self, agent_id: u32, prompt: Value) -> Result<(), String> {
         let session_id = self.session_id(agent_id)?;
         let rx = send_request(
             &self.agents,
             agent_id,
             "session/prompt",
-            json!({
-                "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": text }],
-            }),
+            json!({ "sessionId": session_id, "prompt": prompt }),
         )?;
         let on_event = Arc::clone(&self.on_event);
         std::thread::spawn(move || {
@@ -744,6 +747,23 @@ mod tests {
         assert_eq!(subs[4].id, "task_fe");
         assert_eq!(subs[4].status, "done");
         assert!(subs[4].transcript.is_empty());
+    }
+
+    #[test]
+    fn prompt_blocks_carry_resource_links() {
+        let (bridge, rx, id) = start_ready();
+        bridge
+            .prompt_blocks(
+                id,
+                json!([
+                    { "type": "text", "text": "look at " },
+                    { "type": "resource_link", "uri": "file:///tmp/foo.ts", "name": "foo.ts" },
+                ]),
+            )
+            .unwrap();
+        let (text, _) = drain_turn(&rx);
+        assert_eq!(text, "linked:foo.ts");
+        bridge.kill(id).unwrap();
     }
 
     #[test]

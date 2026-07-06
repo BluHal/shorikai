@@ -27,7 +27,7 @@ type SlashCommand = {
 };
 
 type Row =
-  | { kind: "user"; text: string; queued?: boolean; qid?: number }
+  | { kind: "user"; text: string; queued?: boolean; qid?: number; mentions?: string[] }
   | { kind: "agent"; text: string; done: boolean }
   | { kind: "thought"; text: string; done: boolean; open?: boolean }
   | { kind: "plan"; entries: PlanEntry[] }
@@ -231,6 +231,11 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [cmdSel, setCmdSel] = useState(0);
   const [cmdDismissed, setCmdDismissed] = useState(false);
+  const [fileHits, setFileHits] = useState<string[]>([]);
+  const [fileSel, setFileSel] = useState(0);
+  const [fileDismissed, setFileDismissed] = useState(false);
+  // every path ever picked via @; send() links the ones still in the text
+  const mentionsRef = useRef<string[]>([]);
   const [effort, setEffort] = useState("high");
   const [ctxTokens, setCtxTokens] = useState<number | null>(null);
   const [plan, setPlan] = useState<{ utilization: number; resets_at: string } | null>(null);
@@ -242,7 +247,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const agentIdRef = useRef<number | null>(null);
   const sessionIdRef = useRef("");
   // messages typed while the agent was busy, sent one per turn end
-  const queueRef = useRef<{ qid: number; text: string }[]>([]);
+  const queueRef = useRef<{ qid: number; text: string; mentions: string[] }[]>([]);
   const nextQidRef = useRef(1);
   const subsRef = useRef<SubAgent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -422,7 +427,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             setRows((r) =>
               r.filter((x) => !(x.kind === "user" && x.qid === next.qid)),
             );
-            sendText(next.text);
+            sendText(next.text, next.mentions);
           } else {
             setStatus("ready");
             setAgentStatus(root, "attention"); // downgraded to idle if tab is active
@@ -467,11 +472,24 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [rows]);
 
-  const sendText = (text: string) => {
-    setRows((r) => [...r, { kind: "user", text }]);
+  const sendText = (text: string, mentions: string[] = []) => {
+    setRows((r) => [...r, { kind: "user", text, mentions }]);
     setStatus("busy");
     setAgentStatus(root, "working");
-    invoke("acp_prompt", { id: agentIdRef.current, text }).catch((err) => {
+    const call = mentions.length
+      ? invoke("acp_prompt_blocks", {
+          id: agentIdRef.current,
+          prompt: [
+            { type: "text", text },
+            ...mentions.map((p) => ({
+              type: "resource_link",
+              uri: `file://${root}/${p}`,
+              name: p,
+            })),
+          ],
+        })
+      : invoke("acp_prompt", { id: agentIdRef.current, text });
+    call.catch((err) => {
       setStatus("ready");
       setAgentStatus(root, "idle");
       setRows((r) => [...r, { kind: "system", text: `error: ${err}` }]);
@@ -481,14 +499,15 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const send = () => {
     const text = input.trim();
     if (!text || status === "dead" || status === "starting") return;
+    const mentions = mentionsRef.current.filter((p) => text.includes(`@${p}`));
     setInput("");
     if (status === "busy") {
       const qid = nextQidRef.current++;
-      queueRef.current.push({ qid, text });
-      setRows((r) => [...r, { kind: "user", text, queued: true, qid }]);
+      queueRef.current.push({ qid, text, mentions });
+      setRows((r) => [...r, { kind: "user", text, queued: true, qid, mentions }]);
       return;
     }
-    sendText(text);
+    sendText(text, mentions);
   };
 
   const removeQueued = (qid: number) => {
@@ -563,6 +582,30 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     setCmdSel(0);
   };
 
+  // @-file mentions: popup while the trailing @token is being typed
+  const fileQuery = /(?:^|\s)@(\S*)$/.exec(input)?.[1] ?? null;
+  const fileMatches = fileQuery != null && !fileDismissed ? fileHits.slice(0, 8) : [];
+  const fileIndex = Math.min(fileSel, Math.max(fileMatches.length - 1, 0));
+
+  useEffect(() => {
+    if (fileQuery == null) return;
+    const t = setTimeout(() => {
+      invoke<string[]>("ws_fuzzy", { root, query: fileQuery })
+        .then((hits) => {
+          setFileHits(hits);
+          setFileSel(0);
+        })
+        .catch(() => setFileHits([]));
+    }, 60);
+    return () => clearTimeout(t);
+  }, [fileQuery, root]);
+
+  const pickFile = (path: string) => {
+    if (!mentionsRef.current.includes(path)) mentionsRef.current.push(path);
+    setInput((v) => v.replace(/@\S*$/, `@${path} `));
+    setFileSel(0);
+  };
+
   const advertised = config.models?.availableModels ?? [];
   const modelOptions = config.models
     ? [
@@ -635,6 +678,15 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                         >
                           ×
                         </button>
+                      )}
+                      {(row.mentions?.length ?? 0) > 0 && (
+                        <div className="chat-mentions">
+                          {row.mentions!.map((p) => (
+                            <span key={p} className="chat-mention-chip" title={p}>
+                              @{p.split("/").pop()}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -765,6 +817,23 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             ))}
           </div>
         )}
+        {fileMatches.length > 0 && (
+          <div className="chat-cmd-menu">
+            {fileMatches.map((p, j) => (
+              <button
+                key={p}
+                className={`chat-cmd-item${j === fileIndex ? " chat-cmd-active" : ""}`}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // keep textarea focus
+                  pickFile(p);
+                }}
+              >
+                <span className="chat-cmd-name">@{p.split("/").pop()}</span>
+                <span className="chat-cmd-desc">{p}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           className="chat-input"
           rows={2}
@@ -780,6 +849,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           onChange={(e) => {
             setInput(e.target.value);
             setCmdDismissed(false);
+            setFileDismissed(false);
           }}
           onKeyDown={(e) => {
             if (cmdMatches.length > 0) {
@@ -800,6 +870,27 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
               }
               if (e.key === "Escape") {
                 setCmdDismissed(true);
+                return;
+              }
+            }
+            if (fileMatches.length > 0) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setFileSel((fileIndex + 1) % fileMatches.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setFileSel((fileIndex - 1 + fileMatches.length) % fileMatches.length);
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                pickFile(fileMatches[fileIndex]);
+                return;
+              }
+              if (e.key === "Escape") {
+                setFileDismissed(true);
                 return;
               }
             }

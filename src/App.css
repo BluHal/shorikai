@@ -2171,6 +2171,23 @@
   color: var(--text-4);
 }
 
+/* @-file mention chips inside user bubbles */
+.chat-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.chat-mention-chip {
+  font-size: var(--fs-2xs);
+  color: var(--accent);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-xs);
+  padding: 1px 6px;
+}
+
 /* queued user messages */
 .chat-user-queued .chat-user-bubble {
   opacity: 0.55;

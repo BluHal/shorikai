@@ -73,6 +73,12 @@ rl.on("line", (line) => {
       send({ jsonrpc: "2.0", id: msg.id, result: null });
       break;
     case "session/prompt": {
+      const links = msg.params.prompt.filter((b) => b.type === "resource_link");
+      if (links.length > 0) {
+        chunk(`linked:${links.map((l) => l.name).join(",")}`);
+        send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+        break;
+      }
       const text = msg.params.prompt[0].text;
       if (text === "tools") {
         update({
