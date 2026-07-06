@@ -173,6 +173,13 @@ rl.on("line", (line) => {
         });
         break;
       }
+      if (text === "think") {
+        update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hmm, " } });
+        update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "let me check" } });
+        chunk("done");
+        send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+        break;
+      }
       if (text === "garbage") {
         process.stdout.write("this is not json\n");
       }

@@ -741,6 +741,23 @@ mod tests {
     }
 
     #[test]
+    fn thought_chunks_stream() {
+        let (bridge, rx, id) = start_ready();
+        bridge.prompt(id, "think").unwrap();
+        let (text, others) = drain_turn(&rx);
+        assert_eq!(text, "done");
+        let thoughts: Vec<&str> = others
+            .iter()
+            .filter_map(|e| match e {
+                AcpEvent::AgentThought { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(thoughts, vec!["hmm, ", "let me check"]);
+        bridge.kill(id).unwrap();
+    }
+
+    #[test]
     fn set_mode_round_trip() {
         let (bridge, rx, id) = start_ready();
         bridge.set_mode(id, "acceptEdits").unwrap();

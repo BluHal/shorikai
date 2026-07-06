@@ -21,6 +21,7 @@ type PermissionOption = { optionId: string; name: string; kind?: string };
 type Row =
   | { kind: "user"; text: string }
   | { kind: "agent"; text: string; done: boolean }
+  | { kind: "thought"; text: string; done: boolean; open?: boolean }
   | { kind: "system"; text: string; restart?: boolean }
   | { kind: "team"; ids: string[] }
   | ToolRow
@@ -297,7 +298,24 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                 { ...last, text: last.text + (ev.text ?? "") },
               ];
             }
-            return [...r, { kind: "agent", text: ev.text ?? "", done: false }];
+            // answer text ends the thinking block, collapsing it
+            const closed =
+              last?.kind === "thought" && !last.done
+                ? [...r.slice(0, -1), { ...last, done: true }]
+                : r;
+            return [...closed, { kind: "agent", text: ev.text ?? "", done: false }];
+          });
+          break;
+        case "agent_thought":
+          setRows((r) => {
+            const last = r[r.length - 1];
+            if (last?.kind === "thought" && !last.done) {
+              return [
+                ...r.slice(0, -1),
+                { ...last, text: last.text + (ev.text ?? "") },
+              ];
+            }
+            return [...r, { kind: "thought", text: ev.text ?? "", done: false }];
           });
           break;
         case "tool_call":
@@ -353,7 +371,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
         case "turn_ended":
           setRows((r) =>
             r.map((row) =>
-              row.kind === "agent" && !row.done ? { ...row, done: true } : row,
+              (row.kind === "agent" || row.kind === "thought") && !row.done
+                ? { ...row, done: true }
+                : row,
             ),
           );
           setStatus("ready");
@@ -531,6 +551,25 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                     </Markdown>
                   </div>
                 );
+              case "thought": {
+                const open = row.open ?? !row.done;
+                return (
+                  <div
+                    key={i}
+                    className="chat-thought"
+                    onClick={() =>
+                      setRows((r) =>
+                        r.map((x) => (x === row ? { ...x, open: !open } : x)),
+                      )
+                    }
+                  >
+                    <span className="chat-thought-label">
+                      {open ? "▾" : "▸"} {row.done ? "thought" : "thinking…"}
+                    </span>
+                    {open && <div className="chat-thought-text">{row.text}</div>}
+                  </div>
+                );
+              }
               case "system":
                 return (
                   <div key={i} className="chat-system">

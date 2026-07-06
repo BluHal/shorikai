@@ -2116,6 +2116,32 @@
   color: var(--text-4);
 }
 
+/* agent thinking: dim, collapsible */
+.chat-thought {
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-thought-label {
+  font-size: var(--fs-xs);
+  color: var(--text-4);
+}
+
+.chat-thought:hover .chat-thought-label {
+  color: var(--text-3);
+}
+
+.chat-thought-text {
+  margin-top: 4px;
+  padding-left: 12px;
+  border-left: 2px solid var(--surface-3);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  color: var(--text-3);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
 /* markdown inside agent turns */
 .chat-md p {
   margin: 0 0 12px;
