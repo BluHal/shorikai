@@ -2116,6 +2116,27 @@
   color: var(--text-4);
 }
 
+/* queued user messages */
+.chat-user-queued .chat-user-bubble {
+  opacity: 0.55;
+  border: 1px dashed var(--border);
+}
+
+.chat-queue-remove {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: var(--fs-md);
+  line-height: 1;
+  margin-left: 8px;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.chat-queue-remove:hover {
+  color: var(--error);
+}
+
 /* plan / todo checklist card */
 .chat-plan {
   background: var(--surface-2);

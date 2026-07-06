@@ -21,7 +21,7 @@ type PermissionOption = { optionId: string; name: string; kind?: string };
 type PlanEntry = { content: string; status: string };
 
 type Row =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; queued?: boolean; qid?: number }
   | { kind: "agent"; text: string; done: boolean }
   | { kind: "thought"; text: string; done: boolean; open?: boolean }
   | { kind: "plan"; entries: PlanEntry[] }
@@ -230,6 +230,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   effortRef.current = effort;
   const agentIdRef = useRef<number | null>(null);
   const sessionIdRef = useRef("");
+  // messages typed while the agent was busy, sent one per turn end
+  const queueRef = useRef<{ qid: number; text: string }[]>([]);
+  const nextQidRef = useRef(1);
   const subsRef = useRef<SubAgent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -255,6 +258,8 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     setConfig({});
     sessionIdRef.current = "";
     setCtxTokens(null);
+    queueRef.current = [];
+    setRows((r) => r.filter((x) => !(x.kind === "user" && x.queued)));
     try {
       agentIdRef.current = await invoke<number>("acp_start", {
         agent: name,
@@ -387,7 +392,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             },
           ]);
           break;
-        case "turn_ended":
+        case "turn_ended": {
           setRows((r) =>
             r.map((row) =>
               (row.kind === "agent" || row.kind === "thought") && !row.done
@@ -395,10 +400,20 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                 : row,
             ),
           );
-          setStatus("ready");
-          setAgentStatus(root, "attention"); // downgraded to idle if tab is active
           refreshUsage();
+          const next = queueRef.current.shift();
+          if (next) {
+            // re-appended un-queued by sendText, after the finished turn
+            setRows((r) =>
+              r.filter((x) => !(x.kind === "user" && x.qid === next.qid)),
+            );
+            sendText(next.text);
+          } else {
+            setStatus("ready");
+            setAgentStatus(root, "attention"); // downgraded to idle if tab is active
+          }
           break;
+        }
         case "agent_exit":
           setStatus("dead");
           setAgentStatus(root, "attention");
@@ -437,11 +452,8 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [rows]);
 
-  const send = () => {
-    const text = input.trim();
-    if (!text || status !== "ready") return;
+  const sendText = (text: string) => {
     setRows((r) => [...r, { kind: "user", text }]);
-    setInput("");
     setStatus("busy");
     setAgentStatus(root, "working");
     invoke("acp_prompt", { id: agentIdRef.current, text }).catch((err) => {
@@ -449,6 +461,24 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
       setAgentStatus(root, "idle");
       setRows((r) => [...r, { kind: "system", text: `error: ${err}` }]);
     });
+  };
+
+  const send = () => {
+    const text = input.trim();
+    if (!text || status === "dead" || status === "starting") return;
+    setInput("");
+    if (status === "busy") {
+      const qid = nextQidRef.current++;
+      queueRef.current.push({ qid, text });
+      setRows((r) => [...r, { kind: "user", text, queued: true, qid }]);
+      return;
+    }
+    sendText(text);
+  };
+
+  const removeQueued = (qid: number) => {
+    queueRef.current = queueRef.current.filter((q) => q.qid !== qid);
+    setRows((r) => r.filter((x) => !(x.kind === "user" && x.qid === qid)));
   };
 
   const decide = (row: Row & { kind: "permission" }, optionId: string) => {
@@ -557,9 +587,25 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             switch (row.kind) {
               case "user":
                 return (
-                  <div key={i} className="chat-user">
-                    <span className="chat-user-label">you</span>
-                    <div className="chat-user-bubble">{row.text}</div>
+                  <div
+                    key={i}
+                    className={`chat-user${row.queued ? " chat-user-queued" : ""}`}
+                  >
+                    <span className="chat-user-label">
+                      {row.queued ? "queued" : "you"}
+                    </span>
+                    <div className="chat-user-bubble">
+                      {row.text}
+                      {row.queued && (
+                        <button
+                          className="chat-queue-remove"
+                          title="Remove from queue"
+                          onClick={() => removeQueued(row.qid!)}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               case "agent":
@@ -675,7 +721,9 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           placeholder={
             status === "ready"
               ? "message claude code — enter to send"
-              : statusText[status]
+              : status === "busy"
+                ? "working — enter queues for the next turn"
+                : statusText[status]
           }
           disabled={status === "dead"}
           onChange={(e) => setInput(e.target.value)}
