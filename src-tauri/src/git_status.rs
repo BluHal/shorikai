@@ -1,6 +1,6 @@
 //! git-status: shells out to the git CLI (porcelain v1, NUL-separated).
-//! Status, stage/unstage, commit, and diff-text extraction for the panel.
-//! Push/pull/branch/merge stay in the terminal by design.
+//! Status, stage/unstage, commit/push, and diff-text extraction for the panel.
+//! Pull/branch/merge stay in the terminal by design.
 
 use serde::Serialize;
 use std::process::Command;
@@ -120,6 +120,10 @@ pub fn commit(root: &str, message: &str) -> Result<(), String> {
         return Err("commit message is empty".into());
     }
     git(root, &["commit", "-m", message]).map(|_| ())
+}
+
+pub fn push(root: &str) -> Result<(), String> {
+    git(root, &["push"]).map(|_| ())
 }
 
 #[derive(Clone, Debug, Serialize)]

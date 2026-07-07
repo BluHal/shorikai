@@ -793,7 +793,13 @@
   color: var(--text-4);
 }
 
+.git-commit-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .git-commit-btn {
+  flex: 1;
   background: var(--accent);
   border: none;
   border-radius: var(--r-sm);
@@ -805,7 +811,21 @@
   cursor: pointer;
 }
 
-.git-commit-btn:disabled {
+.git-push-btn {
+  flex: 0 0 82px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.git-commit-btn:disabled,
+.git-push-btn:disabled {
   background: var(--surface-3);
   color: var(--text-4);
   cursor: default;

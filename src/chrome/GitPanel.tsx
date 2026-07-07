@@ -99,6 +99,22 @@ export function GitPanel() {
     );
   };
 
+  const push = () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    invoke("git_push", { root }).then(
+      () => {
+        setBusy(false);
+        refreshGit(root);
+      },
+      (e) => {
+        setError(String(e));
+        setBusy(false);
+      },
+    );
+  };
+
   return (
     <div className="git-panel">
       <div className="git-scroll">
@@ -151,20 +167,30 @@ export function GitPanel() {
             if (e.key === "Enter" && e.metaKey) commit();
           }}
         />
-        <button
-          className="git-commit-btn"
-          disabled={busy || staged.length === 0 || message.trim() === ""}
-          title={
-            staged.length === 0
-              ? "nothing staged"
-              : message.trim() === ""
-                ? "message is empty"
-                : "⌘Enter"
-          }
-          onClick={commit}
-        >
-          Commit
-        </button>
+        <div className="git-commit-actions">
+          <button
+            className="git-commit-btn"
+            disabled={busy || staged.length === 0 || message.trim() === ""}
+            title={
+              staged.length === 0
+                ? "nothing staged"
+                : message.trim() === ""
+                  ? "message is empty"
+                  : "⌘Enter"
+            }
+            onClick={commit}
+          >
+            Commit
+          </button>
+          <button
+            className="git-push-btn"
+            disabled={busy}
+            title="git push"
+            onClick={push}
+          >
+            {git.ahead > 0 ? `Push ↑${git.ahead}` : "Push"}
+          </button>
+        </div>
       </div>
     </div>
   );

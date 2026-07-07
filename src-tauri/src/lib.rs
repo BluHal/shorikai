@@ -630,6 +630,11 @@ fn git_commit(root: String, message: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn git_push(root: String) -> Result<(), String> {
+    git_status::push(&root)
+}
+
+#[tauri::command]
 fn git_diff(root: String, path: String) -> Result<git_status::DiffTexts, String> {
     git_status::diff_texts(&root, &path)
 }
@@ -757,6 +762,7 @@ pub fn run() {
             git_unstage,
             git_stash_all,
             git_commit,
+            git_push,
             git_diff,
             lsp_start,
             lsp_send,
