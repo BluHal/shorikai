@@ -749,12 +749,11 @@ mod tests {
         assert!(others.is_empty(), "unexpected events: {others:?}");
         bridge.kill(id).unwrap();
         loop {
-            match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
-                AcpEvent::AgentExit { agent_id, .. } => {
-                    assert_eq!(agent_id, id);
-                    break;
-                }
-                _ => {}
+            if let AcpEvent::AgentExit { agent_id, .. } =
+                rx.recv_timeout(Duration::from_secs(10)).unwrap()
+            {
+                assert_eq!(agent_id, id);
+                break;
             }
         }
     }
@@ -806,13 +805,13 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(10);
         let (request_id, request) = loop {
-            match rx.recv_timeout(deadline - Instant::now()).unwrap() {
-                AcpEvent::PermissionRequest {
-                    request_id,
-                    request,
-                    ..
-                } => break (request_id, request),
-                _ => {}
+            if let AcpEvent::PermissionRequest {
+                request_id,
+                request,
+                ..
+            } = rx.recv_timeout(deadline - Instant::now()).unwrap()
+            {
+                break (request_id, request);
             }
         };
         assert_eq!(request.pointer("/toolCall/title").unwrap(), "Run npm test");
@@ -943,9 +942,10 @@ mod tests {
 
         // config options may arrive after SessionReady
         loop {
-            match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
-                AcpEvent::ConfigOptions { .. } => break,
-                _ => {}
+            if let AcpEvent::ConfigOptions { .. } =
+                rx.recv_timeout(Duration::from_secs(10)).unwrap()
+            {
+                break;
             }
         }
         bridge.prompt(id, "hi").unwrap();
@@ -1015,12 +1015,11 @@ mod tests {
         bridge.set_mode(id, "acceptEdits").unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match rx.recv_timeout(deadline - Instant::now()).unwrap() {
-                AcpEvent::ConfigOptions { options, .. } => {
-                    assert_eq!(options["currentModeId"], "acceptEdits");
-                    break;
-                }
-                _ => {}
+            if let AcpEvent::ConfigOptions { options, .. } =
+                rx.recv_timeout(deadline - Instant::now()).unwrap()
+            {
+                assert_eq!(options["currentModeId"], "acceptEdits");
+                break;
             }
         }
         bridge.kill(id).unwrap();

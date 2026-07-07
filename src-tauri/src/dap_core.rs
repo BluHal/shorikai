@@ -739,7 +739,7 @@ mod tests {
 
     fn spawn_fake_adapter() -> (Child, u16) {
         let port = free_port().unwrap();
-        let child = Command::new("node")
+        let mut child = Command::new("node")
             .arg(format!(
                 "{}/tests/fake_dap_server.mjs",
                 env!("CARGO_MANIFEST_DIR")
@@ -753,6 +753,8 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+        let _ = child.kill();
+        let _ = child.wait();
         panic!("fake adapter never came up");
     }
 
@@ -798,15 +800,12 @@ mod tests {
         core.continue_(sid, thread_id).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match rx
+            if let DapEvent::Continued { session_id } = rx
                 .recv_timeout(deadline - Instant::now())
                 .expect("no continue")
             {
-                DapEvent::Continued { session_id } => {
-                    assert_eq!(session_id, sid);
-                    break;
-                }
-                _ => {}
+                assert_eq!(session_id, sid);
+                break;
             }
         }
         let _ = adapter.kill();
@@ -861,12 +860,11 @@ mod tests {
         core.step(sid, thread, "next").unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match rx
+            if let DapEvent::Continued { .. } = rx
                 .recv_timeout(deadline - Instant::now())
                 .expect("no continued")
             {
-                DapEvent::Continued { .. } => break,
-                _ => {}
+                break;
             }
         }
         wait_stop(&rx);
@@ -972,15 +970,12 @@ mod tests {
         adapter.kill().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match rx
+            if let DapEvent::SessionEnded { session_id } = rx
                 .recv_timeout(deadline - Instant::now())
                 .expect("no session end")
             {
-                DapEvent::SessionEnded { session_id } => {
-                    assert_eq!(session_id, sid);
-                    break;
-                }
-                _ => {}
+                assert_eq!(session_id, sid);
+                break;
             }
         }
         assert!(

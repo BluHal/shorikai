@@ -129,7 +129,7 @@ export function PreviewPane(props: IDockviewPanelProps<{ path: string }>) {
         <iframe
           className="preview-frame"
           title={path}
-          sandbox="allow-scripts"
+          sandbox=""
           srcDoc={content ?? ""}
         />
       ) : (
