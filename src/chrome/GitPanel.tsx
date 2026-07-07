@@ -66,6 +66,22 @@ export function GitPanel() {
     invoke(cmd, { root, path }).then(() => refreshGit(root), (e) => setError(String(e)));
   };
 
+  const bulk = (cmd: "git_stage_all" | "git_stash_all") => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    invoke(cmd, { root }).then(
+      () => {
+        setBusy(false);
+        refreshGit(root);
+      },
+      (e) => {
+        setBusy(false);
+        setError(String(e));
+      },
+    );
+  };
+
   const commit = () => {
     if (busy) return;
     setBusy(true);
@@ -99,7 +115,15 @@ export function GitPanel() {
         ))}
         {staged.length === 0 && <div className="git-empty">nothing staged</div>}
 
-        <div className="git-section-title">CHANGES — {unstaged.length}</div>
+        <div className="git-section-title git-section-title-actions">
+          <span>CHANGES — {unstaged.length}</span>
+          <button disabled={busy || unstaged.length === 0} onClick={() => bulk("git_stage_all")}>
+            stage all
+          </button>
+          <button disabled={busy || git.files.length === 0} onClick={() => bulk("git_stash_all")}>
+            stash
+          </button>
+        </div>
         {unstaged.map((f) => (
           <Row
             key={`u:${f.path}`}

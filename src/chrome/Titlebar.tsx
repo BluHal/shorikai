@@ -1,13 +1,19 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   addProject,
+  actionsFor,
   closeProject,
+  deleteProjectAction,
   getProjects,
   setActive,
   subscribeProjects,
+  upsertProjectAction,
 } from "../projects";
+import type { ProjectAction } from "../projects";
 import { getGitFor, subscribeGit } from "../gitStore";
+import { bus } from "../bus";
+import { hasShortcutModifier, normalizeShortcut } from "../actions";
 
 const BranchIcon = (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
@@ -17,6 +23,116 @@ const BranchIcon = (
     <path d="M6 8.4v7.2M8.4 6H14a3 3 0 0 1 3 3" />
   </svg>
 );
+
+const ActionIcons = ["⌘", "▶", "✓", "⚡", "◆", "●", "▲", "▣"];
+
+function ActionsMenu(props: { root: string }) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<ProjectAction | null>(null);
+  const [draft, setDraft] = useState({ icon: "⌘", name: "", command: "", shortcut: "" });
+  const actions = useSyncExternalStore(subscribeProjects, () => actionsFor(props.root));
+  const startEdit = (action?: ProjectAction) => {
+    setEditing(action ?? { id: "", icon: "⌘", name: "", command: "", shortcut: "" });
+    setDraft({
+      icon: action?.icon ?? "⌘",
+      name: action?.name ?? "",
+      command: action?.command ?? "",
+      shortcut: action?.shortcut ?? "",
+    });
+  };
+  const saveDraft = () => {
+    const shortcut = normalizeShortcut(draft.shortcut);
+    if (!draft.name.trim() || !draft.command.trim()) return;
+    if (shortcut && !hasShortcutModifier(shortcut)) return;
+    upsertProjectAction(props.root, {
+      id: editing?.id || undefined,
+      icon: draft.icon,
+      name: draft.name,
+      command: draft.command,
+      shortcut,
+    });
+    setEditing(null);
+  };
+  return (
+    <div className="project-actions">
+      <button
+        className={`project-actions-button${actions.length ? " project-actions-button-has-items" : ""}`}
+        title="Project actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
+      >
+        <span className="project-actions-glyph">⌘</span>
+        <span>Actions</span>
+      </button>
+      {open && (
+        <div className="project-actions-menu" onClick={(e) => e.stopPropagation()}>
+          {actions.map((action) => (
+            <div className="project-action-row" key={action.id}>
+              <button
+                className="project-action-run"
+                title={action.command}
+                onClick={() => {
+                  setOpen(false);
+                  bus.openCliTerminal(action.command, action.name);
+                }}
+              >
+                <span className="project-action-label">
+                  <span className="project-action-icon">{action.icon ?? "⌘"}</span>
+                  <span>{action.name}</span>
+                </span>
+                {action.shortcut && <span className="project-action-key">{action.shortcut}</span>}
+              </button>
+              <button title="Edit action" onClick={() => startEdit(action)}>✎</button>
+              <button title="Delete action" onClick={() => deleteProjectAction(props.root, action.id)}>×</button>
+            </div>
+          ))}
+          {actions.length === 0 && <div className="project-actions-empty">No actions</div>}
+          {editing && (
+            <div className="project-action-form">
+              <div className="project-action-icon-grid">
+                {ActionIcons.map((icon) => (
+                  <button
+                    key={icon}
+                    className={draft.icon === icon ? "project-action-icon-active" : ""}
+                    title={`Use ${icon}`}
+                    onClick={() => setDraft({ ...draft, icon })}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+              <input
+                autoFocus
+                placeholder="Name"
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.currentTarget.value })}
+              />
+              <input
+                placeholder="Command"
+                value={draft.command}
+                onChange={(e) => setDraft({ ...draft, command: e.currentTarget.value })}
+              />
+              <input
+                placeholder="Shortcut, e.g. Cmd+Shift+T"
+                value={draft.shortcut}
+                onChange={(e) => setDraft({ ...draft, shortcut: e.currentTarget.value })}
+              />
+              <div className="project-action-form-buttons">
+                <button onClick={() => setEditing(null)}>Cancel</button>
+                <button onClick={saveDraft}>Save</button>
+              </div>
+            </div>
+          )}
+          <button className="project-action-add" onClick={() => startEdit()}>
+            + Add action
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Titlebar() {
   const { projects, active, statuses } = useSyncExternalStore(
@@ -59,6 +175,7 @@ export function Titlebar() {
                   {branch}
                 </span>
               )}
+              {isActive && <ActionsMenu root={p.root} />}
               {projects.length > 1 && (
                 <span
                   className="tab-close"

@@ -103,8 +103,16 @@ pub fn stage(root: &str, path: &str) -> Result<(), String> {
     git(root, &["add", "--", path]).map(|_| ())
 }
 
+pub fn stage_all(root: &str) -> Result<(), String> {
+    git(root, &["add", "-A"]).map(|_| ())
+}
+
 pub fn unstage(root: &str, path: &str) -> Result<(), String> {
     git(root, &["restore", "--staged", "--", path]).map(|_| ())
+}
+
+pub fn stash_all(root: &str) -> Result<(), String> {
+    git(root, &["stash", "push", "-u"]).map(|_| ())
 }
 
 pub fn commit(root: &str, message: &str) -> Result<(), String> {
@@ -219,6 +227,28 @@ mod tests {
 
         assert!(commit(root, "   ").is_err(), "empty message must fail");
         assert!(commit(root, "nothing staged").is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stage_all_and_stash_all() {
+        let dir = repo();
+        let root = dir.to_str().unwrap();
+        fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(root, &["add", "."]).unwrap();
+        git(root, &["commit", "-m", "init"]).unwrap();
+
+        fs::write(dir.join("a.txt"), "two\n").unwrap();
+        fs::write(dir.join("new.txt"), "new\n").unwrap();
+        stage_all(root).unwrap();
+        let st = status(root).unwrap();
+        assert_eq!(find(&st, "a.txt").staged, Some('M'));
+        assert_eq!(find(&st, "new.txt").staged, Some('A'));
+
+        fs::write(dir.join("later.txt"), "later\n").unwrap();
+        stash_all(root).unwrap();
+        assert!(status(root).unwrap().files.is_empty());
+        assert!(!dir.join("later.txt").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

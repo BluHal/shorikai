@@ -59,7 +59,13 @@ impl PtyHost {
             .map_err(|e| e.to_string())?;
 
         let mut builder = match cmd {
-            Some(c) => CommandBuilder::new(c),
+            Some(c) => {
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+                let mut b = CommandBuilder::new(shell);
+                b.arg("-lc");
+                b.arg(c);
+                b
+            }
             None => {
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
                 let mut b = CommandBuilder::new(shell);

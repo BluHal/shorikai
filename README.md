@@ -16,7 +16,8 @@ Built with **Tauri 2 + Rust + React**.
 - **Claude Code + Codex Providers** — Switch agents from the chat pane; provider choice is remembered per project
 - **Multi-Agent Crew** — Run and monitor multiple sub-agents with live status tracking
 - **Multi-Project Workspaces** — Tab-based project switching with session persistence
-- **Git Integration** — Stage, unstage, commit, and view diffs without leaving the cockpit
+- **Project Actions** — Save per-project shell commands with icons and optional keyboard shortcuts
+- **Git Integration** — Stage, unstage, stage all, stash all, commit, and view diffs without leaving the cockpit
 - **Debugging** — Full DAP support with breakpoints, step controls, call stack, variables, and console (Go via Delve, JavaScript via js-debug)
 - **File Search** — Fuzzy file finder and ripgrep-powered content search
 - **Previews** — Render Markdown, HTML, and images as ordinary panes
@@ -43,6 +44,12 @@ npm run dev
 Open the AI chat pane and choose **Claude Code** or **Codex** from the provider control. Shorikai creates default ACP agent entries in `~/.config/shorikai/agents.json` and merges any missing defaults on startup, so custom edits in that file are preserved.
 
 Codex runs with a Shorikai-scoped `CODEX_HOME`, which keeps global Codex MCP server settings from breaking the embedded chat session while still reusing your Codex auth files.
+
+## Project Actions
+
+Use the **Actions** chip in the active project tab to add project-scoped commands such as `npm run dev`, `npm test`, or custom scripts. Actions can have an icon and an optional shortcut, and they run in a project terminal.
+
+Actions are saved in Shorikai session memory alongside project tabs and layouts.
 
 ## Shortcuts
 
@@ -96,6 +103,7 @@ shorikai/
 |------|---------|
 | `~/.config/shorikai/lsp.json` | Language server configuration (auto-created with defaults) |
 | `.shorikai/debug.json` | Per-project debug adapter configuration |
+| `~/.config/shorikai/session.json` | Project tabs, layouts, and saved project actions |
 
 ## Tech Stack
 

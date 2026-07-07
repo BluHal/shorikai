@@ -21,10 +21,12 @@ import {
 } from "./debug";
 import {
   activeWorkspace,
+  actionsFor,
   getProjects,
   initProjects,
   subscribeProjects,
 } from "./projects";
+import { eventShortcut, hasShortcutModifier } from "./actions";
 import "dockview-react/dist/styles/dockview.css";
 import "./App.css";
 
@@ -100,6 +102,11 @@ function runAppCommand(id: string) {
 function handleKey(e: KeyboardEvent): (() => void) | null {
   const ws = activeWorkspace();
   if (!ws) return null;
+  const active = getProjects().active;
+  const custom = actionsFor(active).find(
+    (a) => a.shortcut && hasShortcutModifier(a.shortcut) && a.shortcut === eventShortcut(e),
+  );
+  if (custom) return () => bus.openCliTerminal(custom.command, custom.name);
   const api = ws.api;
   const { metaKey: cmd, shiftKey: shift, altKey: alt, ctrlKey: ctrl } = e;
   const key = e.code;

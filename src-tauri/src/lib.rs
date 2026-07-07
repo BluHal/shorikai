@@ -13,7 +13,7 @@ use pty_host::{PtyEvent, PtyHost};
 use serde::Serialize;
 use serde_json::Value;
 use std::io::BufRead;
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager, State};
 use workspace_index::WorkspaceIndex;
 
@@ -107,6 +107,27 @@ fn prepare_codex_home_for_shorikai(config: &mut AgentConfig) -> Result<(), Strin
         .env
         .insert("CODEX_HOME".into(), dst.to_string_lossy().into_owned());
     Ok(())
+}
+
+fn mac_gui_path(existing: &str, home: Option<&str>) -> String {
+    let mut parts: Vec<String> = existing.split(':').map(str::to_owned).collect();
+    let mut add = |dir: String| {
+        if !parts.iter().any(|p| p == &dir) {
+            parts.push(dir);
+        }
+    };
+    if let Some(home) = home {
+        add(format!("{home}/.local/bin"));
+    }
+    add("/opt/homebrew/bin".into());
+    add("/usr/local/bin".into());
+    parts.join(":")
+}
+
+fn fix_gui_path() {
+    let path = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").ok();
+    std::env::set_var("PATH", mac_gui_path(&path, home.as_deref()));
 }
 
 #[tauri::command]
@@ -589,8 +610,18 @@ fn git_stage(root: String, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn git_stage_all(root: String) -> Result<(), String> {
+    git_status::stage_all(&root)
+}
+
+#[tauri::command]
 fn git_unstage(root: String, path: String) -> Result<(), String> {
     git_status::unstage(&root, &path)
+}
+
+#[tauri::command]
+fn git_stash_all(root: String) -> Result<(), String> {
+    git_status::stash_all(&root)
 }
 
 #[tauri::command]
@@ -605,9 +636,22 @@ fn git_diff(root: String, path: String) -> Result<git_status::DiffTexts, String>
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    fix_gui_path();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .menu(|app| {
+            #[cfg(target_os = "macos")]
+            let app_menu = Submenu::with_items(
+                app,
+                app.package_info().name.clone(),
+                true,
+                &[
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?;
             let open_chat = MenuItem::with_id(
                 app,
                 "open-chat",
@@ -635,7 +679,14 @@ pub fn run() {
                 true,
                 &[&open_chat, &open_terminal, &toggle_terminal],
             )?;
-            Menu::with_items(app, &[&view])
+            Menu::with_items(
+                app,
+                &[
+                    #[cfg(target_os = "macos")]
+                    &app_menu,
+                    &view,
+                ],
+            )
         })
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -702,7 +753,9 @@ pub fn run() {
             fs_write,
             git_status_cmd,
             git_stage,
+            git_stage_all,
             git_unstage,
+            git_stash_all,
             git_commit,
             git_diff,
             lsp_start,
@@ -759,5 +812,13 @@ inherit = "core"
         assert!(cleaned.contains("[shell_environment_policy]"));
         assert!(!cleaned.contains("mcp_servers"));
         assert!(!cleaned.contains("secret"));
+    }
+
+    #[test]
+    fn mac_gui_path_adds_user_cli_dirs_once() {
+        let path = mac_gui_path("/usr/bin:/bin:/opt/homebrew/bin", Some("/Users/me"));
+        assert!(path.contains("/Users/me/.local/bin"));
+        assert!(path.contains("/usr/local/bin"));
+        assert_eq!(path.matches("/opt/homebrew/bin").count(), 1);
     }
 }

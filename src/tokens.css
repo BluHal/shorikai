@@ -80,12 +80,20 @@ html,
 body {
   height: 100%;
   margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--bg);
   color: var(--text-1);
   font-family: var(--font-mono);
   font-size: var(--fs-base);
   letter-spacing: -0.1px;
   -webkit-font-smoothing: antialiased;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
 }
 
 ::-webkit-scrollbar {
