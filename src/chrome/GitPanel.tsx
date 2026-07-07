@@ -182,14 +182,16 @@ export function GitPanel() {
           >
             Commit
           </button>
-          <button
-            className="git-push-btn"
-            disabled={busy}
-            title="git push"
-            onClick={push}
-          >
-            {git.ahead > 0 ? `Push ↑${git.ahead}` : "Push"}
-          </button>
+          {git.ahead > 0 && (
+            <button
+              className="git-push-btn"
+              disabled={busy}
+              title="git push"
+              onClick={push}
+            >
+              Push ↑{git.ahead}
+            </button>
+          )}
         </div>
       </div>
     </div>

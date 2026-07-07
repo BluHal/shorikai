@@ -29,4 +29,8 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    // Monaco's TypeScript worker is ~7MB by design in this desktop bundle.
+    chunkSizeWarningLimit: 8000,
+  },
 }));
