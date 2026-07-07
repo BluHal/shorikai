@@ -33,6 +33,6 @@ jobs:
           releaseName: Shorikai v__VERSION__
           releaseBody: Download the macOS DMG below.
           releaseAssetNamePattern: Shorikai_[version]_universal[ext]
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin
