@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { ToolCard, ToolContentItem, ToolRow } from "./ToolCard";
 import { mdComponentsFor } from "./mdComponents";
 import { setAgentStatus, useProjectRoot } from "../projects";
-import { getGitFor, subscribeGit, trackGitRoot } from "../gitStore";
+import { getGitFor, GitStatus, subscribeGit, trackGitRoot } from "../gitStore";
 import { bus } from "../bus";
 import {
   AgentStrip,
@@ -34,6 +34,13 @@ type ClaudeSession = {
   updatedAt: number;
 };
 
+type ReviewFile = {
+  path: string;
+  staged: string | null;
+  unstaged: string | null;
+  fresh: boolean;
+};
+
 type Row =
   | {
       kind: "user";
@@ -48,6 +55,13 @@ type Row =
   | { kind: "plan"; entries: PlanEntry[] }
   | { kind: "system"; text: string; restart?: boolean }
   | { kind: "team"; ids: string[] }
+  | {
+      kind: "turn_review";
+      files: ReviewFile[];
+      beforeCount: number;
+      afterCount: number;
+      noChange: boolean;
+    }
   | ToolRow
   | {
       kind: "permission";
@@ -169,6 +183,8 @@ const displayName = (key: string) =>
     .join(" ");
 
 const agentStorageKey = (root: string) => `shorikai.agent:${root}`;
+const modeStorageKey = (root: string, agent: string) =>
+  `shorikai.agent-mode:${root}:${agent}`;
 
 // current Claude lineup with exact ids; the adapter only advertises a couple
 // of aliases, so these are merged into whatever it reports
@@ -190,6 +206,23 @@ const EFFORTS = ["low", "medium", "high", "max"].map((e) => ({
 
 const fmtTokens = (n: number) =>
   n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
+
+const gitKey = (f: { path: string; staged: string | null; unstaged: string | null }) =>
+  `${f.path}:${f.staged ?? " "}:${f.unstaged ?? " "}`;
+
+const gitSnapshot = (git: GitStatus | null) =>
+  new Set((git?.files ?? []).map(gitKey));
+
+const isEditLikeTool = (u: ToolUpdate) =>
+  [u.kind, u.title, u.toolCallId]
+    .filter((x): x is string => !!x)
+    .some((x) => /(edit|write|patch|apply|update|create|delete)/i.test(x));
+
+const claimsChange = (text: string) =>
+  /\b(implemented|updated|changed|created|deleted|fixed|patched|wrote|modified)\b/i.test(text);
+
+const configValues = (o?: SessionConfigOption) =>
+  o?.options.flatMap((v) => ("options" in v ? v.options : [v])) ?? [];
 
 /// App-styled replacement for a native <select>: button + popup list.
 function Dropdown(props: {
@@ -288,6 +321,11 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   effortRef.current = effort;
   const agentIdRef = useRef<number | null>(null);
   const sessionIdRef = useRef("");
+  const preTurnGitRef = useRef<GitStatus | null>(null);
+  const turnHadEditToolRef = useRef(false);
+  const turnAgentTextRef = useRef("");
+  const handoffAfterTurnRef = useRef(false);
+  const seedFromHandoffRef = useRef(false);
   // messages typed while the agent was busy, sent one per turn end
   const queueRef = useRef<
     { qid: number; text: string; mentions: string[]; images: Attachment[] }[]
@@ -315,6 +353,95 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     invoke<ClaudeSession[]>("claude_session_history", { cwd: root })
       .then(setHistory)
       .catch(() => setHistory([]));
+  };
+
+  const rememberMode = (value: string) => {
+    localStorage.setItem(modeStorageKey(root, agentRef.current), value);
+  };
+
+  const applyRememberedMode = (next: ConfigState) => {
+    const wanted = localStorage.getItem(modeStorageKey(root, agentRef.current));
+    if (!wanted || agentIdRef.current == null) return next;
+    const modeOpt = next.configOptions?.find((o) => o.category === "mode");
+    if (modeOpt && configValues(modeOpt).some((m) => m.value === wanted)) {
+      if (modeOpt.currentValue !== wanted) {
+        invoke("acp_set_config_option", {
+          id: agentIdRef.current,
+          configId: modeOpt.id,
+          value: wanted,
+        }).catch(() => {});
+        return {
+          ...next,
+          configOptions: next.configOptions?.map((o) =>
+            o.id === modeOpt.id ? { ...o, currentValue: wanted } : o,
+          ),
+        };
+      }
+      return next;
+    }
+    if (next.modes?.availableModes.some((m) => m.id === wanted)) {
+      if (next.modes.currentModeId !== wanted) {
+        invoke("acp_set_mode", {
+          id: agentIdRef.current,
+          modeId: wanted,
+        }).catch(() => {});
+        return {
+          ...next,
+          modes: { ...next.modes, currentModeId: wanted },
+        };
+      }
+    }
+    return next;
+  };
+
+  const readGit = () =>
+    invoke<GitStatus>("git_status_cmd", { root }).catch(() => null);
+
+  const addTurnReview = async () => {
+    const before = preTurnGitRef.current;
+    const after = await readGit();
+    preTurnGitRef.current = null;
+    const beforeSet = gitSnapshot(before);
+    const afterFiles = after?.files ?? [];
+    const afterSet = gitSnapshot(after);
+    const changed =
+      beforeSet.size !== afterSet.size ||
+      [...afterSet].some((key) => !beforeSet.has(key));
+    const noChange =
+      !changed && (turnHadEditToolRef.current || claimsChange(turnAgentTextRef.current));
+    turnHadEditToolRef.current = false;
+    turnAgentTextRef.current = "";
+    if (!after || (afterFiles.length === 0 && !noChange)) return;
+    setRows((r) => [
+      ...r,
+      {
+        kind: "turn_review",
+        files: afterFiles.map((f) => ({
+          path: f.path,
+          staged: f.staged,
+          unstaged: f.unstaged,
+          fresh: !beforeSet.has(gitKey(f)),
+        })),
+        beforeCount: before?.files.length ?? 0,
+        afterCount: afterFiles.length,
+        noChange,
+      },
+    ]);
+  };
+
+  const finishHandoff = async () => {
+    if (!handoffAfterTurnRef.current) return;
+    handoffAfterTurnRef.current = false;
+    try {
+      await invoke<string>("fs_read", { path: `${root}/SESSION.md` });
+      seedFromHandoffRef.current = true;
+      restartSession();
+    } catch {
+      setRows((r) => [
+        ...r,
+        { kind: "system", text: "handoff did not create SESSION.md" },
+      ]);
+    }
   };
 
   const start = async (name = agentRef.current, resume?: string) => {
@@ -382,6 +509,13 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           setStatus("ready");
           refreshUsage();
           refreshHistory();
+          if (seedFromHandoffRef.current) {
+            seedFromHandoffRef.current = false;
+            sendText(
+              "Read @SESSION.md first, then continue from that handoff. Start by stating the next concrete step.",
+              ["SESSION.md"],
+            );
+          }
           break;
         case "user_text":
           setRows((r) => {
@@ -401,6 +535,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
           });
           break;
         case "agent_text":
+          turnAgentTextRef.current += ev.text ?? "";
           setRows((r) => {
             const last = r[r.length - 1];
             if (last?.kind === "agent" && !last.done) {
@@ -432,6 +567,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
         case "tool_call":
           if (ev.update) {
             const u = ev.update;
+            if (isEditLikeTool(u)) turnHadEditToolRef.current = true;
             setRows((r) => applyToolUpdate(r, u));
           }
           break;
@@ -473,15 +609,17 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
         }
         case "config_options": {
           const o = ev.options ?? {};
-          setConfig((c) => ({
-            modes:
-              o.modes ??
-              (o.currentModeId && c.modes
-                ? { ...c.modes, currentModeId: o.currentModeId }
-                : c.modes),
-            models: o.models ?? c.models,
-            configOptions: o.configOptions ?? c.configOptions,
-          }));
+          setConfig((c) =>
+            applyRememberedMode({
+              modes:
+                o.modes ??
+                (o.currentModeId && c.modes
+                  ? { ...c.modes, currentModeId: o.currentModeId }
+                  : c.modes),
+              models: o.models ?? c.models,
+              configOptions: o.configOptions ?? c.configOptions,
+            }),
+          );
           break;
         }
         case "available_commands":
@@ -508,17 +646,25 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             ),
           );
           refreshUsage();
-          const next = queueRef.current.shift();
-          if (next) {
-            // re-appended un-queued by sendText, after the finished turn
-            setRows((r) =>
-              r.filter((x) => !(x.kind === "user" && x.qid === next.qid)),
-            );
-            sendText(next.text, next.mentions, next.images);
-          } else {
-            setStatus("ready");
-            setAgentStatus(root, "attention"); // downgraded to idle if tab is active
-          }
+          const handoff = handoffAfterTurnRef.current;
+          void (async () => {
+            await addTurnReview();
+            if (handoff) {
+              await finishHandoff();
+              return;
+            }
+            const next = queueRef.current.shift();
+            if (next) {
+              // re-appended un-queued by sendText, after the finished turn
+              setRows((r) =>
+                r.filter((x) => !(x.kind === "user" && x.qid === next.qid)),
+              );
+              sendText(next.text, next.mentions, next.images);
+            } else {
+              setStatus("ready");
+              setAgentStatus(root, "attention"); // downgraded to idle if tab is active
+            }
+          })();
           break;
         }
         case "agent_exit":
@@ -569,8 +715,11 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     setRows((r) => [...r, { kind: "user", text, mentions, images: imgs }]);
     setStatus("busy");
     setAgentStatus(root, "working");
-    const call =
-      mentions.length || imgs.length
+    turnHadEditToolRef.current = false;
+    turnAgentTextRef.current = "";
+    const call = (async () => {
+      preTurnGitRef.current = await readGit();
+      return mentions.length || imgs.length
         ? invoke("acp_prompt_blocks", {
             id: agentIdRef.current,
             prompt: [
@@ -588,6 +737,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
             ],
           })
         : invoke("acp_prompt", { id: agentIdRef.current, text });
+    })();
     call.catch((err) => {
       setStatus("ready");
       setAgentStatus(root, "idle");
@@ -615,6 +765,18 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     sendText(text, mentions, imgs);
   };
 
+  const handoff = () => {
+    if (status !== "ready") return;
+    handoffAfterTurnRef.current = true;
+    sendText(
+      [
+        "Update or create SESSION.md in the repo root as a concise handoff for a fresh agent session.",
+        "Include: current goal, what changed, why, files touched, known failures, commands run, and the next concrete step.",
+        "Only edit SESSION.md.",
+      ].join("\n"),
+    );
+  };
+
   const removeQueued = (qid: number) => {
     queueRef.current = queueRef.current.filter((q) => q.qid !== qid);
     setRows((r) => r.filter((x) => !(x.kind === "user" && x.qid === qid)));
@@ -635,6 +797,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
 
   // optimistic update; the agent's current_mode_update confirms or corrects
   const setMode = (modeId: string) => {
+    rememberMode(modeId);
     invoke("acp_set_mode", { id: agentIdRef.current, modeId }).catch(() => {});
     setConfig((c) =>
       c.modes ? { ...c, modes: { ...c.modes, currentModeId: modeId } } : c,
@@ -662,6 +825,11 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
     }));
   };
 
+  const setModeConfigOption = (configId: string, value: string) => {
+    rememberMode(value);
+    setConfigOption(configId, value);
+  };
+
   // effort is fixed at session creation, so changing it restarts the session
   const changeEffort = (e: string) => {
     setEffort(e);
@@ -686,6 +854,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const drilledSub = drill ? subs.find((s) => s.id === drill) : undefined;
   const historyOptions = [
     { value: "__new", label: "new session" },
+    { value: "__handoff", label: "handoff + new session" },
     ...history.map((h) => ({
       value: h.sessionId,
       label: `${new Date(h.updatedAt * 1000).toLocaleString()} · ${h.title}`,
@@ -749,8 +918,6 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const advertised = config.models?.availableModels ?? [];
   const configOption = (category: string) =>
     config.configOptions?.find((o) => o.category === category);
-  const configValues = (o?: SessionConfigOption) =>
-    o?.options.flatMap((v) => ("options" in v ? v.options : [v])) ?? [];
   const modeDescription = (id: string, description?: string | null) =>
     description ??
     {
@@ -770,6 +937,14 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const modeConfig = configOption("mode");
   const modelConfig = configOption("model");
   const effortConfig = configOption("thought_level");
+  const openReviewDiff = (path: string) => {
+    invoke<{ old_text: string; new_text: string }>("git_diff", { root, path }).then(
+      (d) => bus.openDiff(`${root}/${path}`, d.old_text, d.new_text),
+      () => {},
+    );
+  };
+  const reviewLetter = (f: ReviewFile) =>
+    f.unstaged === "?" ? "U" : f.unstaged ?? f.staged ?? "M";
   const modelOptions = modelConfig
     ? configValues(modelConfig).map((m) => ({
         value: m.value,
@@ -809,7 +984,8 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                 value="history"
                 options={historyOptions}
                 onChange={(id) => {
-                  restartSession(id === "__new" ? undefined : id);
+                  if (id === "__handoff") handoff();
+                  else restartSession(id === "__new" ? undefined : id);
                 }}
               />
             )}
@@ -958,6 +1134,37 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                     subs={subs}
                     onDrill={setDrill}
                   />
+                );
+              case "turn_review":
+                return (
+                  <div key={i} className="turn-review">
+                    <div className="turn-review-head">
+                      <span>Turn review</span>
+                      <span>
+                        {row.beforeCount} → {row.afterCount} working tree files
+                      </span>
+                    </div>
+                    {row.noChange && (
+                      <div className="turn-review-note">
+                        No file changes detected for this edit-like turn.
+                      </div>
+                    )}
+                    {row.files.length > 0 && (
+                      <div className="turn-review-files">
+                        {row.files.map((f) => (
+                          <button
+                            key={f.path}
+                            className={`turn-review-file${f.fresh ? " turn-review-fresh" : ""}`}
+                            title={f.path}
+                            onClick={() => openReviewDiff(f.path)}
+                          >
+                            <span>{reviewLetter(f)}</span>
+                            <span>{f.path}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 );
               case "permission":
                 return (
@@ -1160,7 +1367,7 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
                     }))
               }
               onChange={(value) =>
-                modeConfig ? setConfigOption(modeConfig.id, value) : setMode(value)
+                modeConfig ? setModeConfigOption(modeConfig.id, value) : setMode(value)
               }
             />
           )}

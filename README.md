@@ -14,7 +14,11 @@ Built with **Tauri 2 + Rust + React**.
 - **Code Editor** — Monaco editor with Language Server Protocol support (TypeScript, Go, Angular, and more)
 - **AI Agent Chat** — Stream conversations with coding agents via the Agent Communication Protocol (ACP)
 - **Claude Code + Codex Providers** — Switch agents from the chat pane; provider choice is remembered per project
+- **Agent Turn Review** — Each agent turn summarizes the working-tree files it left behind, opens diffs, and flags edit-like turns that produced no file changes
+- **Session Handoff** — Write a `SESSION.md` handoff and restart into a fresh agent session from the chat session menu
+- **Remembered Agent Permissions** — The access permission selector is remembered per project and agent
 - **Multi-Agent Crew** — Run and monitor multiple sub-agents with live status tracking
+- **Agent Inbox** — See projects with agents still working or waiting for attention from the sidebar
 - **Multi-Project Workspaces** — Tab-based project switching with session persistence
 - **Project Actions** — Save per-project shell commands with icons and optional keyboard shortcuts
 - **Git Integration** — Stage, unstage, stage all, stash all, commit, and view diffs without leaving the cockpit
@@ -44,6 +48,8 @@ npm run dev
 Open the AI chat pane and choose **Claude Code** or **Codex** from the provider control. Shorikai creates default ACP agent entries in `~/.config/shorikai/agents.json` and merges any missing defaults on startup, so custom edits in that file are preserved.
 
 Codex runs with a Shorikai-scoped `CODEX_HOME`, which keeps global Codex MCP server settings from breaking the embedded chat session while still reusing your Codex auth files.
+
+The chat pane remembers the last selected access permission mode per project and agent. After each turn, Shorikai compares git status before and after the prompt and shows a compact review card with changed files and diff shortcuts. If a long session starts losing context, use **handoff + new session** from the session menu to ask the agent to update `SESSION.md`, restart, and continue from that handoff.
 
 ## Project Actions
 

@@ -3,7 +3,7 @@ import { FilesPanel } from "./FilesPanel";
 import { GitPanel } from "./GitPanel";
 import { bus } from "../bus";
 import { getGitFor, subscribeGit } from "../gitStore";
-import { useProjectRoot } from "../projects";
+import { getProjects, setActive, subscribeProjects, useProjectRoot } from "../projects";
 
 const FileIcon = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -38,7 +38,14 @@ export function Sidebar() {
   const root = useProjectRoot();
   const [view, setView] = useState<ViewId>("files");
   const git = useSyncExternalStore(subscribeGit, () => getGitFor(root));
+  const { projects, active, statuses } = useSyncExternalStore(
+    subscribeProjects,
+    getProjects,
+  );
   const changeCount = git?.files.length ?? 0;
+  const agentRuns = projects
+    .map((p) => ({ ...p, status: statuses.get(p.root) ?? "idle" }))
+    .filter((p) => p.status !== "idle");
 
   return (
     <div className="sidebar">
@@ -67,6 +74,24 @@ export function Sidebar() {
           ))}
         </div>
       </div>
+
+      {agentRuns.length > 0 && (
+        <div className="agent-inbox">
+          <div className="agent-inbox-title">AGENTS</div>
+          {agentRuns.map((p) => (
+            <button
+              key={p.root}
+              className={`agent-inbox-row agent-inbox-${p.status}`}
+              title={p.root}
+              onClick={() => setActive(p.root)}
+            >
+              <span className="agent-inbox-dot" />
+              <span>{p.name}</span>
+              <span>{p.root === active ? "open" : p.status}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="sidebar-panel-header">
         {view === "files" && <span>EXPLORER</span>}
