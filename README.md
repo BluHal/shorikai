@@ -21,7 +21,10 @@ Built with **Tauri 2 + Rust + React**.
 - **Agent Inbox** — See projects with agents still working or waiting for attention from the sidebar
 - **Multi-Project Workspaces** — Tab-based project switching with session persistence
 - **Project Actions** — Save per-project shell commands with icons and optional keyboard shortcuts
-- **Git Integration** — Stage, unstage, stage all, stash all, commit, and view diffs without leaving the cockpit
+- **Source Control** — Stage, unstage, stash, commit, and inspect exact staged or working-tree diffs from the sidebar
+- **Git Workspace** — Browse branches and history, compare refs, inspect file history and blame, resolve conflicts, and run guarded repository operations in a docked tab
+- **Recoverable Git Operations** — Continue or abort interrupted merge, cherry-pick, revert, and rebase workflows from a persistent banner
+- **Editor Personalization** — Enable Vim-style editing, relative line numbers, and a custom background image with adjustable opacity
 - **Debugging** — Full DAP support with breakpoints, step controls, call stack, variables, and console (Go via Delve, JavaScript via js-debug)
 - **File Search** — Fuzzy file finder and ripgrep-powered content search
 - **Previews** — Render Markdown, HTML, and images as ordinary panes
@@ -57,6 +60,18 @@ Use the **Actions** chip in the active project tab to add project-scoped command
 
 Actions are saved in Shorikai session memory alongside project tabs and layouts.
 
+## Git Workflows
+
+Use **Source Control** for everyday working-tree tasks: review changes, open staged or unstaged diffs, stage files, stash work, and commit. Select **Open Git workspace** for repository-wide workflows including branch browsing, filtered history, ref comparison, commit inspection, stashes, file history, blame, and conflict resolution.
+
+The Git workspace previews destructive actions and supports guarded merge, cherry-pick, revert, rebase, push, branch deletion, and session-scoped deletion undo. In-progress operations remain visible above the workspace and can be continued or aborted after an app restart because Git's own repository metadata is the source of truth. Fetching and other network operations are always explicit.
+
+See [Shorikai Git Functionality](docs/git-functionality.md) for the complete workflow, safety, and configuration reference.
+
+## Editor Settings
+
+Open the titlebar settings menu to toggle Vim-style editing and relative line numbers, or choose a local background image and adjust its opacity. These preferences are stored locally and apply across projects.
+
 ## Shortcuts
 
 | Shortcut | Action |
@@ -87,8 +102,10 @@ shorikai/
 ├── src/                   # React/TypeScript frontend
 │   ├── chrome/            # Shell UI (titlebar, sidebar, status bar, panels)
 │   ├── panes/             # Content panes (terminal, chat, editor, debug, preview)
+│   ├── background.ts      # Custom IDE background settings
 │   ├── bus.ts             # Cross-pane event bus
 │   ├── debug.ts           # DAP client
+│   ├── editorSettings.ts  # Editor display preferences
 │   ├── lsp.ts             # LSP client
 │   ├── gitStore.ts        # Git integration
 │   └── projects.ts        # Workspace state management
@@ -99,6 +116,7 @@ shorikai/
 │       ├── lsp_host.rs    # LSP server process manager
 │       ├── dap_core.rs    # Debug Adapter Protocol client
 │       ├── git_status.rs  # Git operations
+│       ├── git_cockpit.rs # Repository history and guarded Git workflows
 │       └── workspace_index.rs  # File indexing & search
 └── design/                # Design assets and screenshots
 ```

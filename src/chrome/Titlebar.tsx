@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   addProject,
   actionsFor,
@@ -11,9 +11,20 @@ import {
   upsertProjectAction,
 } from "../projects";
 import type { ProjectAction } from "../projects";
+import {
+  clearBackgroundImage,
+  setBackgroundImage,
+  setBackgroundOpacity,
+  useIdeBackground,
+} from "../background";
 import { getGitFor, subscribeGit } from "../gitStore";
 import { bus } from "../bus";
 import { hasShortcutModifier, normalizeShortcut } from "../actions";
+import { setVimMode, useVimMode } from "../vimMode";
+import {
+  setRelativeLineNumbers,
+  useRelativeLineNumbers,
+} from "../editorSettings";
 
 const BranchIcon = (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
@@ -134,7 +145,78 @@ function ActionsMenu(props: { root: string }) {
   );
 }
 
+function SettingsWindow(props: { onClose: () => void }) {
+  const bg = useIdeBackground();
+  const vim = useVimMode();
+  const relativeLines = useRelativeLineNumbers();
+  const pick = async () => {
+    const file = await openDialog({
+      multiple: false,
+      filters: [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"] },
+      ],
+    });
+    if (typeof file === "string") setBackgroundImage(file);
+  };
+
+  return (
+    <div className="settings-backdrop" onMouseDown={props.onClose}>
+      <div className="settings-window" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="settings-head">
+          <span>Settings</span>
+          <button title="Close settings" onClick={props.onClose}>
+            ×
+          </button>
+        </div>
+        <label className="settings-row">
+          <span>
+            <b>Vim mode</b>
+          </span>
+          <input
+            type="checkbox"
+            checked={vim}
+            onChange={(e) => setVimMode(e.currentTarget.checked)}
+          />
+        </label>
+        <label className="settings-row">
+          <span>
+            <b>Relative lines</b>
+          </span>
+          <input
+            type="checkbox"
+            checked={relativeLines}
+            onChange={(e) => setRelativeLineNumbers(e.currentTarget.checked)}
+          />
+        </label>
+        <div className="settings-section">
+          <div className="settings-section-title">Background image</div>
+          <div className="settings-actions">
+            <button onClick={pick}>Pick image</button>
+            <button disabled={!bg.path} onClick={clearBackgroundImage}>
+              Clear
+            </button>
+          </div>
+          {bg.path && <div className="settings-path">{bg.path.split("/").pop()}</div>}
+          <label className="settings-opacity">
+            <span>Opacity</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={bg.opacity}
+              onChange={(e) => setBackgroundOpacity(Number(e.currentTarget.value))}
+            />
+            <span>{Math.round(bg.opacity * 100)}%</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Titlebar() {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { projects, active, statuses } = useSyncExternalStore(
     subscribeProjects,
     getProjects,
@@ -144,7 +226,7 @@ export function Titlebar() {
   );
 
   const pick = async () => {
-    const dir = await open({ directory: true, multiple: false });
+    const dir = await openDialog({ directory: true, multiple: false });
     if (typeof dir === "string") addProject(dir);
   };
 
@@ -170,10 +252,10 @@ export function Titlebar() {
               ) : null}
               <span>{p.name}</span>
               {isActive && branch && (
-                <span className="tab-branch">
+                <button className="tab-branch" title="Browse branches" onClick={(event) => { event.stopPropagation(); bus.openGit("branches"); }}>
                   {BranchIcon}
                   {branch}
-                </span>
+                </button>
               )}
               {isActive && <ActionsMenu root={p.root} />}
               {projects.length > 1 && (
@@ -195,6 +277,14 @@ export function Titlebar() {
           +
         </div>
       </div>
+      <button
+        className="settings-button"
+        title="Settings"
+        onClick={() => setSettingsOpen(true)}
+      >
+        ⚙
+      </button>
+      {settingsOpen && <SettingsWindow onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

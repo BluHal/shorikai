@@ -14,9 +14,39 @@ export type GitFile = {
 
 export type GitStatus = {
   branch: string;
+  head: string;
+  detached: boolean;
+  upstream: string | null;
   ahead: number;
   behind: number;
+  conflicts: number;
+  remotes: string[];
+  default_branch: string | null;
+  worktrees: GitWorktree[];
+  operation: GitOperation | null;
   files: GitFile[];
+};
+
+export type GitWorktree = {
+  path: string;
+  head: string;
+  branch: string | null;
+  detached: boolean;
+  bare: boolean;
+};
+
+export type GitOperation = {
+  kind: "merge" | "cherry_pick" | "revert" | "rebase" | "bisect" | "detached_head";
+  label: string;
+  title: string;
+  message: string;
+  can_continue: boolean;
+  can_abort: boolean;
+  can_skip: boolean;
+  conflicts: number;
+  progress_current: number | null;
+  progress_total: number | null;
+  current_commit: string | null;
 };
 
 const states = new Map<string, GitStatus | null>();

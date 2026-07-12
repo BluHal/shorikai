@@ -1,5 +1,6 @@
 mod acp_bridge;
 mod dap_core;
+mod git_cockpit;
 mod git_status;
 mod lsp_host;
 mod pty_host;
@@ -87,6 +88,16 @@ fn strip_mcp_servers_from_toml(raw: &str) -> String {
     out.join("\n") + "\n"
 }
 
+fn copy_codex_identity(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    for name in ["auth.json", "installation_id"] {
+        let from = src.join(name);
+        if from.exists() {
+            std::fs::copy(&from, dst.join(name)).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 fn prepare_codex_home_for_shorikai(config: &mut AgentConfig) -> Result<(), String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
     let src = std::path::Path::new(&home).join(".codex");
@@ -97,12 +108,7 @@ fn prepare_codex_home_for_shorikai(config: &mut AgentConfig) -> Result<(), Strin
         std::fs::write(dst.join("config.toml"), strip_mcp_servers_from_toml(&raw))
             .map_err(|e| e.to_string())?;
     }
-    for name in ["auth.json", "installation_id", "models_cache.json"] {
-        let from = src.join(name);
-        if from.exists() {
-            std::fs::copy(&from, dst.join(name)).map_err(|e| e.to_string())?;
-        }
-    }
+    copy_codex_identity(&src, &dst)?;
     config
         .env
         .insert("CODEX_HOME".into(), dst.to_string_lossy().into_owned());
@@ -605,6 +611,16 @@ fn git_status_cmd(root: String) -> Result<git_status::GitStatus, String> {
 }
 
 #[tauri::command]
+fn git_operation_action(root: String, action: String) -> Result<(), String> {
+    git_status::operation_action(&root, &action)
+}
+
+#[tauri::command]
+fn git_create_branch(root: String, name: String) -> Result<(), String> {
+    git_status::create_branch(&root, &name)
+}
+
+#[tauri::command]
 fn git_stage(root: String, path: String) -> Result<(), String> {
     git_status::stage(&root, &path)
 }
@@ -635,8 +651,188 @@ fn git_push(root: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn git_diff(root: String, path: String) -> Result<git_status::DiffTexts, String> {
-    git_status::diff_texts(&root, &path)
+fn git_diff(
+    root: String,
+    path: String,
+    staged: bool,
+    orig_path: Option<String>,
+) -> Result<git_status::DiffTexts, String> {
+    git_status::diff_texts(&root, &path, staged, orig_path.as_deref())
+}
+
+#[tauri::command]
+fn git_branches(root: String) -> Result<Vec<git_cockpit::BranchInfo>, String> {
+    git_cockpit::branches(&root)
+}
+
+#[tauri::command]
+fn git_fetch(root: String, remote: Option<String>) -> Result<(), String> {
+    git_cockpit::fetch(&root, remote.as_deref())
+}
+
+#[tauri::command]
+fn git_checkout(root: String, target: String, smart: bool) -> Result<(), String> {
+    git_cockpit::checkout(&root, &target, smart)
+}
+
+#[tauri::command]
+fn git_branch_create(
+    root: String,
+    name: String,
+    start: Option<String>,
+    switch: bool,
+) -> Result<(), String> {
+    git_cockpit::create_branch(&root, &name, start.as_deref(), switch)
+}
+
+#[tauri::command]
+fn git_history(
+    root: String,
+    filter: git_cockpit::HistoryFilter,
+) -> Result<Vec<git_cockpit::CommitInfo>, String> {
+    git_cockpit::history(&root, &filter)
+}
+
+#[tauri::command]
+fn git_compare(root: String, selected: String) -> Result<git_cockpit::Comparison, String> {
+    git_cockpit::compare(&root, &selected)
+}
+
+#[tauri::command]
+fn git_commit_files(root: String, commit: String) -> Result<Vec<git_cockpit::ChangedPath>, String> {
+    git_cockpit::commit_files(&root, &commit)
+}
+
+#[tauri::command]
+fn git_commit_diff(
+    root: String,
+    commit: String,
+    path: String,
+    old_path: Option<String>,
+) -> Result<git_status::DiffTexts, String> {
+    git_cockpit::commit_diff(&root, &commit, &path, old_path.as_deref())
+}
+
+#[tauri::command]
+fn git_stashes(root: String) -> Result<Vec<git_cockpit::StashInfo>, String> {
+    git_cockpit::stashes(&root)
+}
+
+#[tauri::command]
+fn git_stash_create(root: String, message: String, untracked: bool) -> Result<(), String> {
+    git_cockpit::create_stash(&root, &message, untracked)
+}
+
+#[tauri::command]
+fn git_stash_action(root: String, action: String, reference: String) -> Result<(), String> {
+    git_cockpit::stash_action(&root, &action, &reference)
+}
+
+#[tauri::command]
+fn git_conflicts(root: String) -> Result<Vec<git_cockpit::ConflictInfo>, String> {
+    git_cockpit::conflicts(&root)
+}
+
+#[tauri::command]
+fn git_resolve(
+    root: String,
+    path: String,
+    content: Option<String>,
+    side: Option<String>,
+) -> Result<(), String> {
+    git_cockpit::resolve(&root, &path, content.as_deref(), side.as_deref())
+}
+
+#[tauri::command]
+fn git_push_preview(root: String) -> Result<git_cockpit::PushPreview, String> {
+    git_cockpit::push_preview(&root)
+}
+
+#[tauri::command]
+fn git_push_execute(
+    root: String,
+    force_lease: bool,
+    expected: Option<String>,
+) -> Result<(), String> {
+    git_cockpit::push(&root, force_lease, expected.as_deref())
+}
+
+#[tauri::command]
+fn git_merge(root: String, branch: String) -> Result<(), String> {
+    git_cockpit::merge(&root, &branch)
+}
+
+#[tauri::command]
+fn git_cherry_pick(root: String, commits: Vec<String>) -> Result<(), String> {
+    git_cockpit::cherry_pick(&root, &commits)
+}
+
+#[tauri::command]
+fn git_revert_start(root: String, commit: String) -> Result<String, String> {
+    git_cockpit::start_revert(&root, &commit)
+}
+
+#[tauri::command]
+fn git_revert_exclude(root: String, path: String) -> Result<(), String> {
+    git_cockpit::exclude_revert_path(&root, &path)
+}
+
+#[tauri::command]
+fn git_revert_finish(root: String, message: String) -> Result<(), String> {
+    git_cockpit::finish_revert(&root, &message)
+}
+
+#[tauri::command]
+fn git_rebase(root: String, upstream: String, autostash: bool) -> Result<(), String> {
+    git_cockpit::rebase(&root, &upstream, autostash)
+}
+
+#[tauri::command]
+fn git_rebase_action(root: String, action: String) -> Result<(), String> {
+    git_cockpit::rebase_action(&root, &action)
+}
+
+#[tauri::command]
+fn git_interactive_rebase(
+    root: String,
+    base: String,
+    steps: Vec<git_cockpit::RebaseStep>,
+) -> Result<(), String> {
+    git_cockpit::interactive_rebase(&root, &base, &steps)
+}
+
+#[tauri::command]
+fn git_delete_preview(root: String, branch: String) -> Result<git_cockpit::DeletePreview, String> {
+    git_cockpit::delete_preview(&root, &branch)
+}
+
+#[tauri::command]
+fn git_delete_branch(
+    root: String,
+    branch: String,
+    force: bool,
+    unprotect: bool,
+) -> Result<(), String> {
+    git_cockpit::delete_branch(&root, &branch, force, unprotect)
+}
+
+#[tauri::command]
+fn git_undo_delete(root: String, alternate: Option<String>) -> Result<(), String> {
+    git_cockpit::undo_delete(&root, alternate.as_deref())
+}
+
+#[tauri::command]
+fn git_file_history(root: String, path: String) -> Result<git_cockpit::FileHistory, String> {
+    git_cockpit::file_history(&root, &path)
+}
+
+#[tauri::command]
+fn git_blame(
+    root: String,
+    path: String,
+    ignore_whitespace: bool,
+) -> Result<Vec<git_cockpit::BlameLine>, String> {
+    git_cockpit::blame(&root, &path, ignore_whitespace)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -655,6 +851,20 @@ pub fn run() {
                     &PredefinedMenuItem::hide_others(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?;
+            let edit = Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
                 ],
             )?;
             let open_chat = MenuItem::with_id(
@@ -689,6 +899,7 @@ pub fn run() {
                 &[
                     #[cfg(target_os = "macos")]
                     &app_menu,
+                    &edit,
                     &view,
                 ],
             )
@@ -757,6 +968,8 @@ pub fn run() {
             fs_read,
             fs_write,
             git_status_cmd,
+            git_operation_action,
+            git_create_branch,
             git_stage,
             git_stage_all,
             git_unstage,
@@ -764,6 +977,34 @@ pub fn run() {
             git_commit,
             git_push,
             git_diff,
+            git_branches,
+            git_fetch,
+            git_checkout,
+            git_branch_create,
+            git_history,
+            git_compare,
+            git_commit_files,
+            git_commit_diff,
+            git_stashes,
+            git_stash_create,
+            git_stash_action,
+            git_conflicts,
+            git_resolve,
+            git_push_preview,
+            git_push_execute,
+            git_merge,
+            git_cherry_pick,
+            git_revert_start,
+            git_revert_exclude,
+            git_revert_finish,
+            git_rebase,
+            git_rebase_action,
+            git_interactive_rebase,
+            git_delete_preview,
+            git_delete_branch,
+            git_undo_delete,
+            git_file_history,
+            git_blame,
             lsp_start,
             lsp_send,
             lsp_kill,
@@ -818,6 +1059,31 @@ inherit = "core"
         assert!(cleaned.contains("[shell_environment_policy]"));
         assert!(!cleaned.contains("mcp_servers"));
         assert!(!cleaned.contains("secret"));
+    }
+
+    #[test]
+    fn codex_home_copies_identity_without_cross_version_model_cache() {
+        let root = std::env::temp_dir().join(format!("shorikai-codex-home-{}", std::process::id()));
+        let src = root.join("source");
+        let dst = root.join("destination");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("auth.json"), "auth").unwrap();
+        std::fs::write(src.join("installation_id"), "install").unwrap();
+        std::fs::write(src.join("models_cache.json"), r#"{"effort":"max"}"#).unwrap();
+
+        copy_codex_identity(&src, &dst).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dst.join("auth.json")).unwrap(),
+            "auth"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("installation_id")).unwrap(),
+            "install"
+        );
+        assert!(!dst.join("models_cache.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

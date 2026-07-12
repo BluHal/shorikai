@@ -7,10 +7,12 @@ import { useProjectRoot } from "../projects";
 const statusClass = (s: string) =>
   s === "D" ? "git-del" : s === "M" || s === "R" ? "git-mod" : "git-add";
 
-function openDiff(root: string, file: GitFile) {
+function openDiff(root: string, file: GitFile, staged: boolean) {
   invoke<{ old_text: string; new_text: string }>("git_diff", {
     root,
     path: file.path,
+    staged,
+    origPath: file.orig_path,
   }).then(
     (d) => bus.openDiff(`${root}/${file.path}`, d.old_text, d.new_text),
     () => {},
@@ -28,7 +30,7 @@ function Row(props: {
   const name = file.path.split("/").pop() ?? file.path;
   const dir = file.path.slice(0, file.path.length - name.length - 1);
   return (
-    <div className="git-row" onClick={() => openDiff(props.root, file)}>
+    <div className="git-row" onClick={() => openDiff(props.root, file, props.action === "unstage")}>
       <span className={`git-letter ${statusClass(letter)}`}>
         {letter === "?" ? "U" : letter}
       </span>
@@ -99,24 +101,11 @@ export function GitPanel() {
     );
   };
 
-  const push = () => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    invoke("git_push", { root }).then(
-      () => {
-        setBusy(false);
-        refreshGit(root);
-      },
-      (e) => {
-        setError(String(e));
-        setBusy(false);
-      },
-    );
-  };
-
   return (
     <div className="git-panel">
+      <div className="git-workspace-entry">
+        <button onClick={() => bus.openGit("history")}>Open Git workspace</button>
+      </div>
       <div className="git-scroll">
         <div className="git-section-title">STAGED — {staged.length}</div>
         {staged.map((f) => (
@@ -186,8 +175,8 @@ export function GitPanel() {
             <button
               className="git-push-btn"
               disabled={busy}
-              title="git push"
-              onClick={push}
+              title="Preview push"
+              onClick={() => bus.openGit("push")}
             >
               Push ↑{git.ahead}
             </button>

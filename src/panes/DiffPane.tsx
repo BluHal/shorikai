@@ -30,7 +30,7 @@ export function DiffPane(
       readOnly: true,
       renderSideBySide: true,
       scrollBeyondLastLine: false,
-      automaticLayout: false,
+      automaticLayout: true,
     });
     editor.setModel({ original, modified });
 
@@ -45,5 +45,9 @@ export function DiffPane(
     };
   }, []);
 
-  return <div ref={ref} className="editor-host" />;
+  return (
+    <div className="editor-pane">
+      <div ref={ref} className="editor-host" />
+    </div>
+  );
 }

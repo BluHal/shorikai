@@ -8,12 +8,14 @@ import {
   SerializedDockview,
 } from "dockview-react";
 import { Sidebar } from "./chrome/Sidebar";
+import { GitOperationBanner } from "./chrome/GitOperationBanner";
 import { TerminalPane } from "./panes/TerminalPane";
 import { ChatPane } from "./panes/ChatPane";
 import { EditorPane } from "./panes/EditorPane";
 import { DiffPane } from "./panes/DiffPane";
 import { DebugPane } from "./panes/DebugPane";
 import { PreviewPane, previewMode, IMAGE_EXT } from "./panes/PreviewPane";
+import { GitCockpitPane } from "./panes/GitCockpitPane";
 import { bus } from "./bus";
 import {
   getProjects,
@@ -32,6 +34,7 @@ const components = {
   diff: DiffPane,
   debug: DebugPane,
   preview: PreviewPane,
+  "git-cockpit": GitCockpitPane,
 };
 
 export const isEditorish = (id: string) =>
@@ -409,6 +412,25 @@ export function Workspace(props: { root: string; visible: boolean }) {
     }
   };
 
+  const openGit = (section = "history", target?: string) => {
+    const api = apiRef.current;
+    if (!api) return;
+    const existing = api.getPanel("git-cockpit");
+    if (existing) {
+      existing.api.updateParameters({ section, target, nonce: Date.now() });
+      existing.api.setActive();
+      return;
+    }
+    const active = api.activePanel;
+    api.addPanel({
+      id: "git-cockpit",
+      component: "git-cockpit",
+      title: "Git",
+      params: { section, target },
+      position: active ? { referencePanel: active, direction: "within" } : undefined,
+    });
+  };
+
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     registerWorkspace(root, {
@@ -423,6 +445,7 @@ export function Workspace(props: { root: string; visible: boolean }) {
       addDebugTerminal,
       openDebugPane,
       openCliTerminal,
+      openGit,
     });
 
     let restored = false;
@@ -474,13 +497,18 @@ export function Workspace(props: { root: string; visible: boolean }) {
     <ProjectCtx.Provider value={root}>
       <div className="workspace" style={{ display: props.visible ? "flex" : "none" }}>
         <Sidebar />
-        <DockviewReact
-          className="dockview-theme-dark app-dock"
-          components={components}
-          rightHeaderActionsComponent={DockChip}
-          onReady={onReady}
-        />
-        {rail && <EditorRail files={rail} onRestore={restoreEditors} />}
+        <div className="workspace-main">
+          <GitOperationBanner />
+          <div className="workspace-dock-row">
+            <DockviewReact
+              className="dockview-theme-dark app-dock"
+              components={components}
+              rightHeaderActionsComponent={DockChip}
+              onReady={onReady}
+            />
+            {rail && <EditorRail files={rail} onRestore={restoreEditors} />}
+          </div>
+        </div>
       </div>
     </ProjectCtx.Provider>
   );

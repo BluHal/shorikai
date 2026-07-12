@@ -66,6 +66,7 @@ export type WorkspaceHandlers = {
   }) => void;
   openDebugPane: () => void;
   openCliTerminal: (cmd: string, title: string) => void;
+  openGit: (section?: string, target?: string) => void;
 };
 const handlers = new Map<string, WorkspaceHandlers>();
 export const registerWorkspace = (root: string, h: WorkspaceHandlers) => {

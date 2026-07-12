@@ -26,6 +26,7 @@ import {
   initProjects,
   subscribeProjects,
 } from "./projects";
+import { backgroundUrl, useIdeBackground } from "./background";
 import { eventShortcut, hasShortcutModifier } from "./actions";
 import "dockview-react/dist/styles/dockview.css";
 import "./App.css";
@@ -41,6 +42,7 @@ bus.startDebugTerminal = () => startDebugTerminal();
 bus.startGoDebug = () => startGoDebug();
 bus.openCliTerminal = (cmd, title) =>
   activeWorkspace()?.openCliTerminal(cmd, title);
+bus.openGit = (section, target) => activeWorkspace()?.openGit(section, target);
 
 function DebugOverlay() {
   const { paused, error, starting } = useSyncExternalStore(subscribeDebug, getDebug);
@@ -159,6 +161,7 @@ function App() {
     subscribeProjects,
     getProjects,
   );
+  const bg = useIdeBackground();
 
   useEffect(() => {
     (async () => {
@@ -214,6 +217,15 @@ function App() {
 
   return (
     <>
+      {bg.path && (
+        <div
+          className="ide-bg"
+          style={{
+            backgroundImage: `url("${backgroundUrl(bg.path)}")`,
+            opacity: bg.opacity,
+          }}
+        />
+      )}
       <Titlebar />
       <div className="app-body">
         {loaded &&

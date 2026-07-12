@@ -11,4 +11,5 @@ export const bus = {
   startDebugTerminal: () => {},
   startGoDebug: () => {},
   openCliTerminal: (_cmd: string, _title: string) => {},
+  openGit: (_section?: string, _target?: string) => {},
 };

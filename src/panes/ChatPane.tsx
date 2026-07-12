@@ -198,6 +198,24 @@ const KNOWN_MODELS = [
   { modelId: "claude-haiku-4-5", name: "Haiku 4.5" },
 ];
 
+const KNOWN_CODEX_MODELS: SessionConfigValue[] = [
+  {
+    value: "gpt-5.6-sol",
+    name: "GPT-5.6-Sol",
+    description: "Latest frontier agentic coding model.",
+  },
+  {
+    value: "gpt-5.6-terra",
+    name: "GPT-5.6-Terra",
+    description: "Balanced agentic coding model for everyday work.",
+  },
+  {
+    value: "gpt-5.6-luna",
+    name: "GPT-5.6-Luna",
+    description: "Fast and affordable agentic coding model.",
+  },
+];
+
 // SDK session option; changing it requires a session restart
 const EFFORTS = ["low", "medium", "high", "max"].map((e) => ({
   value: e,
@@ -937,8 +955,10 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const modeConfig = configOption("mode");
   const modelConfig = configOption("model");
   const effortConfig = configOption("thought_level");
+  const configuredModels = configValues(modelConfig);
+  const knownConfigModels = agent === "codex" ? KNOWN_CODEX_MODELS : [];
   const openReviewDiff = (path: string) => {
-    invoke<{ old_text: string; new_text: string }>("git_diff", { root, path }).then(
+      invoke<{ old_text: string; new_text: string }>("git_diff", { root, path, staged: false, origPath: null }).then(
       (d) => bus.openDiff(`${root}/${path}`, d.old_text, d.new_text),
       () => {},
     );
@@ -946,7 +966,12 @@ export function ChatPane(props: { api?: { setTitle(t: string): void } }) {
   const reviewLetter = (f: ReviewFile) =>
     f.unstaged === "?" ? "U" : f.unstaged ?? f.staged ?? "M";
   const modelOptions = modelConfig
-    ? configValues(modelConfig).map((m) => ({
+    ? [
+        ...configuredModels,
+        ...knownConfigModels.filter(
+          (known) => !configuredModels.some((model) => model.value === known.value),
+        ),
+      ].map((m) => ({
         value: m.value,
         label: m.name,
         description: m.description,
