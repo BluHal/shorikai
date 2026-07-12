@@ -99,6 +99,9 @@ pub struct AgentConfig {
     pub env: HashMap<String, String>,
 }
 
+const LEGACY_CODEX_ADAPTER: &str = "@zed-industries/codex-acp";
+const CODEX_ADAPTER: &str = "@agentclientprotocol/codex-acp";
+
 fn default_agents() -> Value {
     json!({
         "claude-code": {
@@ -107,15 +110,28 @@ fn default_agents() -> Value {
         },
         "codex": {
             "command": "npx",
-            "args": ["--yes", "@zed-industries/codex-acp"],
+            "args": ["--yes", CODEX_ADAPTER],
             "fallback": "codex"
         }
     })
 }
 
+fn migrate_codex_adapter(agents: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(config) = agents.get_mut("codex").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let is_legacy_default = config.get("command").and_then(Value::as_str) == Some("npx")
+        && config.get("args") == Some(&json!(["--yes", LEGACY_CODEX_ADAPTER]));
+    if is_legacy_default {
+        config.insert("args".into(), json!(["--yes", CODEX_ADAPTER]));
+    }
+    is_legacy_default
+}
+
 /// Agent definitions live in a plain config file so the client stays
 /// agent-agnostic: ~/.config/shorikai/agents.json. Missing default entries
-/// are merged in additively; user edits win.
+/// are merged in additively; user edits win. The retired default Codex adapter
+/// is migrated in place while preserving any extra fields.
 pub fn load_agents() -> Result<Value, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
     let dir = std::path::Path::new(&home).join(".config/shorikai");
@@ -137,6 +153,7 @@ pub fn load_agents() -> Result<Value, String> {
             changed = true;
         }
     }
+    changed |= migrate_codex_adapter(agents);
     if changed {
         std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap())
             .map_err(|e| e.to_string())?;
@@ -693,6 +710,29 @@ mod tests {
             )],
             env: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn legacy_codex_adapter_is_upgraded_without_losing_custom_settings() {
+        let mut agents = serde_json::json!({
+            "codex": {
+                "command": "npx",
+                "args": ["--yes", "@zed-industries/codex-acp"],
+                "fallback": "codex",
+                "env": { "NO_BROWSER": "1" }
+            },
+            "custom-codex": {
+                "command": "/custom/codex-acp"
+            }
+        });
+
+        assert!(migrate_codex_adapter(agents.as_object_mut().unwrap()));
+        assert_eq!(
+            agents["codex"]["args"],
+            serde_json::json!(["--yes", "@agentclientprotocol/codex-acp"])
+        );
+        assert_eq!(agents["codex"]["env"]["NO_BROWSER"], "1");
+        assert_eq!(agents["custom-codex"]["command"], "/custom/codex-acp");
     }
 
     fn start_ready() -> (AcpBridge, mpsc::Receiver<AcpEvent>, u32) {
